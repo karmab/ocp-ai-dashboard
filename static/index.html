@@ -11,7 +11,7 @@
 body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #fff; height: 100vh; overflow: hidden; }
 
 @keyframes scan-pulse {
-  0% { transform: scale(0.1); opacity: 0.6; }
+  0% { transform: scale(0.05); opacity: 0.7; }
   100% { transform: scale(1); opacity: 0; }
 }
 #scan-overlay {
@@ -23,11 +23,15 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
   position: absolute; top: 50%; left: 50%;
   width: 200vmax; height: 200vmax;
   margin-left: -100vmax; margin-top: -100vmax;
-  border-radius: 50%; border: 2px solid #00cc66;
-  animation: scan-pulse 2.5s ease-out infinite;
+  border-radius: 50%; border: 3px solid rgba(0, 255, 100, 0.6);
+  box-shadow: 0 0 30px rgba(0, 255, 100, 0.25), inset 0 0 30px rgba(0, 255, 100, 0.05);
+  animation: scan-pulse 3.5s ease-out infinite;
 }
-#scan-overlay .scan-ring:nth-child(2) { animation-delay: 0.6s; }
-#scan-overlay .scan-ring:nth-child(3) { animation-delay: 1.2s; }
+#scan-overlay .scan-ring:nth-child(2) { animation-delay: 0.5s; }
+#scan-overlay .scan-ring:nth-child(3) { animation-delay: 1.0s; }
+#scan-overlay .scan-ring:nth-child(4) { animation-delay: 1.5s; }
+#scan-overlay .scan-ring:nth-child(5) { animation-delay: 2.0s; }
+#scan-overlay .scan-ring:nth-child(6) { animation-delay: 2.5s; }
 #scan-overlay .scan-label {
   position: absolute; bottom: 20px; left: 50%;
   transform: translateX(-50%);
@@ -209,6 +213,9 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
   <div id="map-container">
     <div id="map"></div>
     <div id="scan-overlay">
+      <div class="scan-ring"></div>
+      <div class="scan-ring"></div>
+      <div class="scan-ring"></div>
       <div class="scan-ring"></div>
       <div class="scan-ring"></div>
       <div class="scan-ring"></div>
@@ -513,6 +520,44 @@ function clusterIcon(reachable) {
   });
 }
 
+const healthColors = {
+  green: { fill: '#00cc66', border: '#33ff99' },
+  yellow: { fill: '#ffcc00', border: '#ffdd44' },
+  red: { fill: '#ee0000', border: '#ff4444' },
+  unknown: { fill: '#666', border: '#888' },
+};
+
+function placeMarker(c) {
+  const hc = healthColors[c.health] || healthColors.unknown;
+  const marker = L.marker([c.lat, c.lon], {
+    icon: L.divIcon({
+      className: '',
+      html: `<div class="cluster-marker-dot animate-in" style="width:24px; height:24px; background:${hc.fill}; border:3px solid ${hc.border};"></div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    }),
+  }).addTo(map).on('click', () => showClusterInfo(c));
+  marker.clusterName = c.name;
+  markers[c.name] = marker;
+  const tagsLine = (c.tags && c.tags.length) ? `<br><span style="color:#999; font-size:11px;">${c.tags.join(' · ')}</span>` : '';
+  marker.bindTooltip(c.display_name + tagsLine, {
+    permanent: false, direction: 'top', offset: [0, -10],
+    className: 'cluster-tooltip',
+  });
+}
+
+function updateMarkerColor(c) {
+  const marker = markers[c.name];
+  if (!marker) return;
+  const hc = healthColors[c.health] || healthColors.unknown;
+  marker.setIcon(L.divIcon({
+    className: '',
+    html: `<div class="cluster-marker-dot" style="width:24px; height:24px; background:${hc.fill}; border:3px solid ${hc.border};"></div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  }));
+}
+
 async function loadClusters() {
   const scanOverlay = document.getElementById('scan-overlay');
   scanOverlay.style.display = 'block';
@@ -526,35 +571,23 @@ async function loadClusters() {
     return;
   }
 
-  scanOverlay.style.display = 'none';
   Object.values(markers).forEach(m => map.removeLayer(m));
   markers = {};
-  const healthColors = {
-    green: { fill: '#00cc66', border: '#33ff99' },
-    yellow: { fill: '#ffcc00', border: '#ffdd44' },
-    red: { fill: '#ee0000', border: '#ff4444' },
-  };
 
-  for (const c of clusters) {
-    const hc = healthColors[c.health] || healthColors.red;
-    const marker = L.marker([c.lat, c.lon], {
-      icon: L.divIcon({
-        className: '',
-        html: `<div class="cluster-marker-dot animate-in" style="width:24px; height:24px; background:${hc.fill}; border:3px solid ${hc.border};"></div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      }),
-    }).addTo(map).on('click', () => showClusterInfo(c));
+  for (const c of clusters) placeMarker(c);
 
-    marker.clusterName = c.name;
-    markers[c.name] = marker;
-
-    const tagsLine = (c.tags && c.tags.length) ? `<br><span style="color:#999; font-size:11px;">${c.tags.join(' · ')}</span>` : '';
-    marker.bindTooltip(c.display_name + tagsLine, {
-      permanent: false, direction: 'top', offset: [0, -10],
-      className: 'cluster-tooltip',
-    });
-  }
+  const statusPromises = clusters.map(c =>
+    fetchJSON(`/api/clusters/${c.name}/status`).then(status => {
+      Object.assign(c, status);
+      updateMarkerColor(c);
+    }).catch(() => {
+      c.health = 'red';
+      c.health_details = 'unreachable';
+      c.reachable = false;
+      updateMarkerColor(c);
+    })
+  );
+  Promise.all(statusPromises).then(() => { scanOverlay.style.display = 'none'; });
 }
 
 async function showClusterInfo(cluster) {
@@ -562,9 +595,9 @@ async function showClusterInfo(cluster) {
   panel.innerHTML = `
     <h3>${cluster.display_name}</h3>
     <div class="status">
-      <span class="status-dot ${cluster.reachable ? 'green' : 'red'}"></span>
-      ${cluster.reachable ? 'Connected' : 'Unreachable'}
-      &bull; ${cluster.ready_nodes}/${cluster.node_count} nodes ready
+      <span class="status-dot ${cluster.reachable == null ? '' : cluster.reachable ? 'green' : 'red'}"></span>
+      ${cluster.reachable == null ? 'Loading status...' : cluster.reachable ? 'Connected' : 'Unreachable'}
+      ${cluster.node_count != null ? `&bull; ${cluster.ready_nodes}/${cluster.node_count} nodes ready` : ''}
     </div>
     <div style="color: #999; font-size: 12px; margin-bottom: 12px;">Loading models...</div>
   `;
@@ -593,7 +626,7 @@ async function showClusterInfo(cluster) {
               <div class="ml-name">${m.name}</div>
               <div class="ml-meta">
                 <span class="status-dot ${m.ready ? 'green' : 'yellow'}"></span>
-                ${m.status} &bull; ${m.replicas}x &bull; ${m.gpu_per_replica > 0 ? m.gpu_per_replica + ' GPU' : 'CPU'}
+                ${m.status} &bull; ${m.replicas}x &bull; ${m.gpu_per_replica > 0 ? m.gpu_per_replica + ' GPU' : 'CPU'} &bull; ${m.namespace}
               </div>
               <div class="ml-meta">${m.model_id}</div>
             </div>

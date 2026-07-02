@@ -307,25 +307,27 @@ def list_apps(cluster):
 @app.get("/api/clusters")
 def api_list_clusters():
     clusters = load_clusters()
-
-    def build_entry(c):
-        info = cluster_status(c)
-        lat = info.pop("detected_lat", None) or c.get("lat", 0)
-        lon = info.pop("detected_lon", None) or c.get("lon", 0)
-        health = get_cluster_health(c) if info["reachable"] else {"health": "red", "health_details": "unreachable"}
-        return {
+    return [
+        {
             "name": c["name"],
             "display_name": c["display_name"],
-            "lat": lat,
-            "lon": lon,
+            "lat": c.get("lat", 0),
+            "lon": c.get("lon", 0),
             "tags": c.get("tags", []),
-            **info,
-            **health,
         }
+        for c in clusters
+    ]
 
-    with ThreadPoolExecutor(max_workers=len(clusters)) as pool:
-        result = list(pool.map(build_entry, clusters))
-    return result
+
+@app.get("/api/clusters/{name}/status")
+def api_cluster_status(name: str):
+    clusters = load_clusters()
+    c = next((c for c in clusters if c["name"] == name), None)
+    if not c:
+        raise HTTPException(404, f"Cluster '{name}' not found")
+    info = cluster_status(c)
+    health = get_cluster_health(c) if info["reachable"] else {"health": "red", "health_details": "unreachable"}
+    return {**info, **health}
 
 
 @app.get("/api/clusters/{name}/details")
