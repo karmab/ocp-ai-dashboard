@@ -318,6 +318,7 @@ def api_list_clusters():
             "display_name": c["display_name"],
             "lat": lat,
             "lon": lon,
+            "tags": c.get("tags", []),
             **info,
             **health,
         }
@@ -459,6 +460,21 @@ def api_delete_cluster(name: str):
     clusters = [c for c in clusters if c["name"] != name]
     save_clusters(clusters)
     return {"ok": True}
+
+
+class TagsUpdate(BaseModel):
+    tags: list[str]
+
+
+@app.put("/api/clusters/{name}/tags")
+def api_update_tags(name: str, body: TagsUpdate):
+    clusters = load_clusters()
+    cluster = next((c for c in clusters if c["name"] == name), None)
+    if not cluster:
+        raise HTTPException(404, f"Cluster '{name}' not found")
+    cluster["tags"] = body.tags
+    save_clusters(clusters)
+    return {"ok": True, "tags": cluster["tags"]}
 
 
 @app.get("/api/clusters/{name}/models")
