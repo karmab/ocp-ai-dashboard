@@ -10,27 +10,29 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #fff; height: 100vh; overflow: hidden; }
 
-@keyframes sonar-pulse {
-  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0.9; }
-  100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+@keyframes scan-pulse {
+  0% { transform: scale(0.1); opacity: 0.6; }
+  100% { transform: scale(1); opacity: 0; }
 }
-.sonar-container {
-  position: relative; width: 28px; height: 28px;
+#scan-overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 800; pointer-events: none; overflow: hidden;
+  display: none;
 }
-.sonar-ring {
+#scan-overlay .scan-ring {
   position: absolute; top: 50%; left: 50%;
-  width: 28px; height: 28px; border-radius: 50%;
-  border: 2px solid #00cc66;
-  transform: translate(-50%, -50%) scale(0.3);
-  animation: sonar-pulse 1.5s ease-out infinite;
+  width: 200vmax; height: 200vmax;
+  margin-left: -100vmax; margin-top: -100vmax;
+  border-radius: 50%; border: 2px solid #00cc66;
+  animation: scan-pulse 2.5s ease-out infinite;
 }
-.sonar-ring:nth-child(2) { animation-delay: 0.3s; }
-.sonar-ring:nth-child(3) { animation-delay: 0.6s; }
-.sonar-dot {
-  position: absolute; top: 50%; left: 50%;
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #00cc66;
-  transform: translate(-50%, -50%);
+#scan-overlay .scan-ring:nth-child(2) { animation-delay: 0.6s; }
+#scan-overlay .scan-ring:nth-child(3) { animation-delay: 1.2s; }
+#scan-overlay .scan-label {
+  position: absolute; bottom: 20px; left: 50%;
+  transform: translateX(-50%);
+  color: #00cc66; font-size: 12px; text-transform: uppercase;
+  letter-spacing: 2px; opacity: 0.8;
 }
 
 .cluster-marker-dot {
@@ -192,6 +194,12 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
 <div id="main">
   <div id="map-container">
     <div id="map"></div>
+    <div id="scan-overlay">
+      <div class="scan-ring"></div>
+      <div class="scan-ring"></div>
+      <div class="scan-ring"></div>
+      <div class="scan-label">Scanning clusters...</div>
+    </div>
   </div>
 
   <div id="sidebar">
@@ -492,13 +500,19 @@ function clusterIcon(reachable) {
 }
 
 async function loadClusters() {
+  const scanOverlay = document.getElementById('scan-overlay');
+  scanOverlay.style.display = 'block';
+
   try {
     const data = await fetchJSON('/api/clusters');
     clusters = data;
   } catch (e) {
+    scanOverlay.style.display = 'none';
     toast(`Failed to load clusters: ${e.message}`, 3000);
     return;
   }
+
+  scanOverlay.style.display = 'none';
   Object.values(markers).forEach(m => map.removeLayer(m));
   markers = {};
   const healthColors = {
@@ -506,30 +520,6 @@ async function loadClusters() {
     yellow: { fill: '#ffcc00', border: '#ffdd44' },
     red: { fill: '#ee0000', border: '#ff4444' },
   };
-
-  const sonarMarkers = [];
-  for (const c of clusters) {
-    const hc = healthColors[c.health] || healthColors.red;
-    const sonar = L.marker([c.lat, c.lon], {
-      interactive: false,
-      icon: L.divIcon({
-        className: '',
-        html: `<div class="sonar-container">
-          <div class="sonar-ring" style="border-color:${hc.fill}"></div>
-          <div class="sonar-ring" style="border-color:${hc.fill}"></div>
-          <div class="sonar-ring" style="border-color:${hc.fill}"></div>
-          <div class="sonar-dot" style="background:${hc.fill}"></div>
-        </div>`,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-      }),
-    }).addTo(map);
-    sonarMarkers.push(sonar);
-  }
-
-  await new Promise(r => setTimeout(r, 1500));
-
-  sonarMarkers.forEach(m => map.removeLayer(m));
 
   for (const c of clusters) {
     const hc = healthColors[c.health] || healthColors.red;
