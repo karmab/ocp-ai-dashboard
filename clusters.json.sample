@@ -1,0 +1,23 @@
+[
+  {
+    "name": "vai",
+    "display_name": "vai (Azure)",
+    "kubeconfig": "/Users/jhendrix/.kcli/clusters/vai/auth/kubeconfig",
+    "lat": 37.37,
+    "lon": -122.04
+  },
+  {
+    "name": "satch",
+    "display_name": "satch (AWS)",
+    "kubeconfig": "/Users/jhendrix/.kcli/clusters/satch/auth/kubeconfig",
+    "lat": 45.52,
+    "lon": -122.68
+  },
+  {
+    "name": "bumblefoot",
+    "display_name": "bumblefoot (libvirt)",
+    "kubeconfig": "/Users/jhendrix/.kcli/clusters/bumblefoot/auth/kubeconfig",
+    "lat": 40.71,
+    "lon": -74.01
+  }
+]

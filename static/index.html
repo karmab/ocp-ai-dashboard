@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RHOAI Grid Orchestrator</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #fff; height: 100vh; overflow: hidden; }
+
+#header {
+  height: 48px; background: #0c0c0c; border-bottom: 2px solid #ee0000;
+  display: flex; align-items: center; padding: 0 20px; z-index: 1000;
+}
+#header h1 { font-size: 18px; font-weight: 600; color: #fff; }
+#header h1 span { color: #ee0000; }
+
+#main { display: flex; height: calc(100vh - 48px); }
+
+#map-container { flex: 1; position: relative; }
+#map { width: 100%; height: 100%; }
+
+#sidebar {
+  width: 320px; background: #0c0c0c; border-left: 1px solid #333;
+  overflow-y: auto; display: flex; flex-direction: column;
+}
+
+.sidebar-section {
+  padding: 16px; border-bottom: 1px solid #333;
+}
+.sidebar-section h2 {
+  font-size: 14px; font-weight: 600; color: #ee0000; text-transform: uppercase;
+  letter-spacing: 1px; margin-bottom: 12px;
+}
+
+.model-card {
+  background: #2a2a2a; border-left: 3px solid #ee0000; border-radius: 4px;
+  padding: 10px 12px; margin-bottom: 8px; cursor: grab; transition: background 0.2s;
+}
+.model-card:hover { background: #333; }
+.model-card.selected { background: #3a1a1a; border-left-color: #ff4444; }
+.model-card .model-title { font-size: 13px; font-weight: 600; }
+.model-card .model-sub { font-size: 11px; color: #999; margin-top: 2px; }
+
+.btn {
+  background: #ee0000; color: #fff; border: none; padding: 8px 16px;
+  border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 13px;
+  font-weight: 500; transition: background 0.2s; width: 100%;
+}
+.btn:hover { background: #cc0000; }
+.btn-outline {
+  background: transparent; border: 1px solid #ee0000; color: #ee0000;
+}
+.btn-outline:hover { background: #ee0000; color: #fff; }
+.btn-sm { padding: 5px 10px; font-size: 11px; width: auto; }
+.btn-danger { background: #880000; }
+.btn-danger:hover { background: #aa0000; }
+
+.form-group { margin-bottom: 10px; }
+.form-group label { display: block; font-size: 11px; color: #999; margin-bottom: 4px; text-transform: uppercase; }
+.form-group input, .form-group select {
+  width: 100%; background: #2a2a2a; border: 1px solid #444; color: #fff;
+  padding: 6px 10px; border-radius: 4px; font-family: inherit; font-size: 13px;
+}
+.form-group input:focus, .form-group select:focus { border-color: #ee0000; outline: none; }
+
+#info-panel { padding: 16px; }
+#info-panel h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+#info-panel .status { font-size: 12px; margin-bottom: 12px; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.status-dot.green { background: #00cc66; }
+.status-dot.red { background: #ee0000; }
+.status-dot.yellow { background: #ffcc00; }
+
+.model-list-item {
+  background: #2a2a2a; border-radius: 4px; padding: 10px; margin-bottom: 6px;
+  display: flex; justify-content: space-between; align-items: center;
+  cursor: grab;
+}
+.model-list-item:active { cursor: grabbing; }
+.model-list-item .ml-name { font-size: 13px; font-weight: 500; }
+.model-list-item .ml-meta { font-size: 11px; color: #999; }
+.model-list-item .ml-actions { display: flex; gap: 4px; }
+
+#deploy-dialog {
+  display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: #2a2a2a; border: 1px solid #ee0000; border-radius: 8px;
+  padding: 24px; z-index: 2000; min-width: 340px;
+}
+#deploy-overlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.7); z-index: 1999;
+}
+#deploy-dialog h3 { font-size: 16px; margin-bottom: 16px; color: #ee0000; }
+
+#toast {
+  display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #2a2a2a; border: 1px solid #ee0000; color: #fff; padding: 10px 20px;
+  border-radius: 4px; z-index: 3000; font-size: 13px;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #2a2a2a !important; color: #fff !important; border-radius: 6px !important;
+  border: 1px solid #ee0000 !important;
+}
+.leaflet-popup-tip { background: #2a2a2a !important; }
+.leaflet-popup-content { font-family: 'Red Hat Display', sans-serif !important; font-size: 13px !important; }
+
+#add-cluster-form { display: none; }
+.cluster-marker { background: none !important; border: none !important; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1><span>RHOAI</span> Grid Orchestrator</h1>
+</div>
+
+<div id="main">
+  <div id="map-container">
+    <div id="map"></div>
+  </div>
+
+  <div id="sidebar">
+    <div class="sidebar-section">
+      <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('apps-library-wrap')">Models <span id="apps-library-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
+      <div id="apps-library-wrap">
+      <div id="apps-library">
+        <div class="model-card" data-type="model" data-model-id="Qwen/Qwen3-0.6B" data-model-name="qwen3-0-6b" data-gpus="1" onclick="selectApp(this)">
+          <div class="model-title">Qwen3-0.6B</div>
+          <div class="model-sub">Qwen/Qwen3-0.6B &bull; 1 GPU</div>
+        </div>
+        <div class="model-card" data-type="model" data-model-id="Qwen/Qwen3-14B" data-model-name="qwen3-14b" data-gpus="2" onclick="selectApp(this)">
+          <div class="model-title">Qwen3-14B</div>
+          <div class="model-sub">Qwen/Qwen3-14B &bull; 2 GPUs</div>
+        </div>
+        <div class="model-card" data-type="model" data-model-id="meta-llama/Llama-4-Scout-17B-16E-Instruct" data-model-name="llama4-scout" data-gpus="4" onclick="selectApp(this)">
+          <div class="model-title">Llama 4 Scout</div>
+          <div class="model-sub">meta-llama/Llama-4-Scout &bull; 4 GPUs</div>
+        </div>
+        <div class="model-card" data-type="model" data-model-id="mistralai/Mistral-7B-Instruct-v0.3" data-model-name="mistral-7b" data-gpus="1" onclick="selectApp(this)">
+          <div class="model-title">Mistral 7B</div>
+          <div class="model-sub">mistralai/Mistral-7B &bull; 1 GPU</div>
+        </div>
+        <div class="model-card" data-type="model" data-model-id="ibm-granite/granite-3.3-8b-instruct" data-model-name="granite-8b" data-gpus="1" onclick="selectApp(this)">
+          <div class="model-title">Granite 3.3 8B</div>
+          <div class="model-sub">ibm-granite/granite-3.3-8b &bull; 1 GPU</div>
+        </div>
+        <div class="model-card" data-type="model" data-model-id="google/gemma-3-4b-it" data-model-name="gemma3-4b" data-gpus="1" onclick="selectApp(this)">
+          <div class="model-title">Gemma 3 4B</div>
+          <div class="model-sub">google/gemma-3-4b-it &bull; 1 GPU</div>
+        </div>
+        <div class="model-card" data-type="model" data-model-id="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B" data-model-name="deepseek-r1-7b" data-gpus="1" onclick="selectApp(this)">
+          <div class="model-title">DeepSeek R1 7B</div>
+          <div class="model-sub">deepseek-ai/DeepSeek-R1 &bull; 1 GPU</div>
+        </div>
+        <div class="model-card" data-type="model" data-model-id="microsoft/Phi-4-mini-instruct" data-model-name="phi4-mini" data-gpus="1" onclick="selectApp(this)">
+          <div class="model-title">Phi-4 Mini</div>
+          <div class="model-sub">microsoft/Phi-4-mini &bull; 1 GPU</div>
+        </div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="openCustomModelWizard()" style="margin-top: 8px; width: 100%;">+ Custom Model</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('apps-container-wrap')">Apps <span id="apps-container-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
+      <div id="apps-container-wrap">
+      <div id="apps-container">
+        <div class="model-card" data-type="app" data-image="quay.io/mavazque/reversewords:latest" data-app-name="reversewords" onclick="selectApp(this)" style="border-left-color: #0088cc;">
+          <div class="model-title">Reverse Words</div>
+          <div class="model-sub">quay.io/mavazque/reversewords</div>
+        </div>
+        <div class="model-card" data-type="app" data-image="quay.io/karmab/kdummy:latest" data-app-name="kdummy" onclick="selectApp(this)" style="border-left-color: #0088cc;">
+          <div class="model-title">KDummy</div>
+          <div class="model-sub">quay.io/karmab/kdummy</div>
+        </div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="openCustomAppWizard()" style="margin-top: 8px; width: 100%; border-color: #0088cc; color: #0088cc;">+ Custom App</button>
+      <div style="margin-top: 10px; font-size: 11px; color: #666;">
+        Select an item, then click a cluster on the map to deploy
+      </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('links-section-wrap')">Model Links <span id="links-section-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
+      <div id="links-section-wrap">
+        <div id="links-list" style="margin-bottom: 8px;"></div>
+        <button class="btn btn-outline btn-sm" onclick="openLinkWizard()" style="width:100%; border-color:#ff8800; color:#ff8800;">+ Link Models</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h2>Cluster Management</h2>
+      <button class="btn btn-outline" onclick="toggleAddCluster()" style="margin-bottom: 10px;">+ Add Cluster</button>
+      <div id="add-cluster-form">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="new-cluster-name" placeholder="my-cluster">
+        </div>
+        <div class="form-group">
+          <label>Display Name</label>
+          <input type="text" id="new-cluster-display" placeholder="My Cluster (Cloud)">
+        </div>
+        <div class="form-group">
+          <label>Kubeconfig Path</label>
+          <input type="text" id="new-cluster-kubeconfig" placeholder="/path/to/kubeconfig">
+        </div>
+        <div class="form-group">
+          <label>Location</label>
+          <input type="text" id="new-cluster-location" placeholder="Click on the map" readonly>
+          <input type="hidden" id="new-cluster-lat">
+          <input type="hidden" id="new-cluster-lon">
+        </div>
+        <button class="btn" onclick="addCluster()">Register Cluster</button>
+      </div>
+    </div>
+
+    <div id="info-panel">
+      <div style="color: #666; font-size: 13px; text-align: center; padding: 40px 0;">
+        Click a cluster marker on the map to view details
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="deploy-overlay" onclick="closeDeployDialog()"></div>
+<div id="deploy-dialog">
+  <h3 id="deploy-dialog-title">Deploy Model</h3>
+  <div class="form-group">
+    <label id="deploy-model-id-label">Model</label>
+    <input type="text" id="deploy-model-id" readonly>
+  </div>
+  <div class="form-group">
+    <label>Target Cluster</label>
+    <input type="text" id="deploy-cluster" readonly>
+  </div>
+  <div class="form-group">
+    <label>Namespace</label>
+    <input type="text" id="deploy-namespace">
+  </div>
+  <div class="form-group">
+    <label>Replicas</label>
+    <input type="number" id="deploy-replicas" value="1" min="1" max="8">
+  </div>
+  <div class="form-group">
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+      <input type="checkbox" id="deploy-cpu-only" onchange="toggleCpuOnly()"> CPU Only (no GPU)
+    </label>
+  </div>
+  <div class="form-group" id="deploy-gpu-row">
+    <label>GPUs per Replica</label>
+    <input type="number" id="deploy-gpus" value="1" min="1" max="8">
+  </div>
+  <div style="display: flex; gap: 8px; margin-top: 16px;">
+    <button class="btn" onclick="submitDeploy()">Deploy</button>
+    <button class="btn btn-outline" onclick="closeDeployDialog()">Cancel</button>
+  </div>
+</div>
+
+<div id="wizard-overlay" onclick="closeWizard()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1999;"></div>
+<div id="wizard-dialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #ee0000; border-radius:8px; padding:24px; z-index:2000; min-width:380px;">
+  <h3 id="wizard-title" style="font-size:16px; margin-bottom:16px; color:#ee0000;">Add Custom Model</h3>
+  <div id="wizard-model-fields">
+    <div class="form-group">
+      <label>Display Name</label>
+      <input type="text" id="wiz-model-display" placeholder="My Model 7B">
+    </div>
+    <div class="form-group">
+      <label>Model ID (HuggingFace)</label>
+      <input type="text" id="wiz-model-id" placeholder="org/model-name">
+    </div>
+    <div class="form-group">
+      <label>Default GPUs</label>
+      <input type="number" id="wiz-model-gpus" value="1" min="1" max="8">
+    </div>
+  </div>
+  <div id="wizard-app-fields" style="display:none;">
+    <div class="form-group">
+      <label>Display Name</label>
+      <input type="text" id="wiz-app-display" placeholder="My App">
+    </div>
+    <div class="form-group">
+      <label>Container Image</label>
+      <input type="text" id="wiz-app-image" placeholder="quay.io/org/image:latest">
+    </div>
+  </div>
+  <div style="display:flex; gap:8px; margin-top:16px;">
+    <button class="btn" onclick="submitWizard()">Add to Library</button>
+    <button class="btn btn-outline" onclick="closeWizard()">Cancel</button>
+  </div>
+</div>
+
+<div id="link-overlay" onclick="closeLinkWizard()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1999;"></div>
+<div id="link-dialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #ff8800; border-radius:8px; padding:24px; z-index:2000; min-width:380px;">
+  <h3 style="font-size:16px; margin-bottom:16px; color:#ff8800;">Link Model Across Clusters</h3>
+  <div class="form-group">
+    <label>Model Name</label>
+    <input type="text" id="link-model-name" placeholder="qwen3-0-6b">
+  </div>
+  <div class="form-group">
+    <label>Model Namespace</label>
+    <input type="text" id="link-model-ns" placeholder="my-first-model">
+  </div>
+  <div class="form-group">
+    <label>Model ID (HuggingFace)</label>
+    <input type="text" id="link-model-id" placeholder="Qwen/Qwen3-0.6B">
+  </div>
+  <div class="form-group">
+    <label>Cluster A</label>
+    <select id="link-cluster-a"></select>
+  </div>
+  <div class="form-group">
+    <label>Cluster B</label>
+    <select id="link-cluster-b"></select>
+  </div>
+  <div style="display:flex; gap:8px; margin-top:16px;">
+    <button class="btn" style="background:#ff8800;" onclick="submitLink()">Create Link</button>
+    <button class="btn btn-outline" onclick="closeLinkWizard()">Cancel</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', { zoomControl: false, minZoom: 3, maxZoom: 12 }).setView([39.5, -98.5], 4);
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO',
+  maxZoom: 19,
+}).addTo(map);
+
+let clusters = [];
+let markers = {};
+let selectedApp = null;
+let addingCluster = false;
+let draggedModel = null;
+let linkLines = [];
+let linksData = [];
+
+function toast(msg, duration = 3000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', duration);
+}
+
+async function fetchJSON(url, opts) {
+  const resp = await fetch(url, opts);
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new Error(err.detail || err.message || 'Request failed');
+  }
+  return resp.json();
+}
+
+function clusterIcon(reachable) {
+  const color = reachable ? '#00cc66' : '#ee0000';
+  const glow = reachable ? 'rgba(0,204,102,0.6)' : 'rgba(238,0,0,0.6)';
+  const border = reachable ? '#33ff99' : '#ff4444';
+  return L.divIcon({
+    className: 'cluster-marker',
+    html: `<div style="
+      width: 28px; height: 28px; border-radius: 50%;
+      background: ${color};
+      border: 3px solid ${border};
+      box-shadow: 0 0 12px ${glow};
+      display: flex; align-items: center; justify-content: center;
+    "><div style="width: 8px; height: 8px; border-radius: 50%; background: #fff;"></div></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
+async function loadClusters() {
+  try {
+    const data = await fetchJSON('/api/clusters');
+    clusters = data;
+  } catch (e) {
+    toast(`Failed to load clusters: ${e.message}`, 3000);
+    return;
+  }
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+  const healthColors = {
+    green: { fill: '#00cc66', border: '#33ff99' },
+    yellow: { fill: '#ffcc00', border: '#ffdd44' },
+    red: { fill: '#ee0000', border: '#ff4444' },
+  };
+  for (const c of clusters) {
+    const hc = healthColors[c.health] || healthColors.red;
+    const marker = L.circleMarker([c.lat, c.lon], {
+      radius: 12,
+      fillColor: hc.fill,
+      color: hc.border,
+      weight: 3,
+      opacity: 1,
+      fillOpacity: 0.9,
+    }).addTo(map).on('click', () => showClusterInfo(c));
+
+    marker.clusterName = c.name;
+    markers[c.name] = marker;
+
+    marker.bindTooltip(c.display_name, {
+      permanent: false, direction: 'top', offset: [0, -10],
+      className: 'cluster-tooltip',
+    });
+  }
+}
+
+async function showClusterInfo(cluster) {
+  const panel = document.getElementById('info-panel');
+  panel.innerHTML = `
+    <h3>${cluster.display_name}</h3>
+    <div class="status">
+      <span class="status-dot ${cluster.reachable ? 'green' : 'red'}"></span>
+      ${cluster.reachable ? 'Connected' : 'Unreachable'}
+      &bull; ${cluster.ready_nodes}/${cluster.node_count} nodes ready
+    </div>
+    <div style="color: #999; font-size: 12px; margin-bottom: 12px;">Loading models...</div>
+  `;
+
+  if (selectedApp) {
+    openDeployDialog(cluster.name);
+    return;
+  }
+
+  try {
+    const [models, details] = await Promise.all([
+      fetchJSON(`/api/clusters/${cluster.name}/models`),
+      fetchJSON(`/api/clusters/${cluster.name}/details`).catch(() => null),
+    ]);
+
+    let modelsHtml = '';
+    if (models.length === 0) {
+      modelsHtml = '<div style="color: #666; font-size: 12px; padding: 8px 0;">No models deployed</div>';
+    } else {
+      for (const m of models) {
+        modelsHtml += `
+          <div class="model-list-item" draggable="true"
+               ondragstart="startDragModel(event, '${cluster.name}', '${m.namespace}', '${m.name}', '${m.model_id}')"
+               ondragend="endDragModel()">
+            <div>
+              <div class="ml-name">${m.name}</div>
+              <div class="ml-meta">
+                <span class="status-dot ${m.ready ? 'green' : 'yellow'}"></span>
+                ${m.status} &bull; ${m.replicas}x &bull; ${m.gpu_per_replica > 0 ? m.gpu_per_replica + ' GPU' : 'CPU'}
+              </div>
+              <div class="ml-meta">${m.model_id}</div>
+            </div>
+            <div class="ml-actions">
+              <button class="btn btn-danger btn-sm" onclick="deleteModel('${cluster.name}', '${m.namespace}', '${m.name}')">✕</button>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    let appsHtml = '';
+    try {
+      const apps = await fetchJSON(`/api/clusters/${cluster.name}/apps`);
+      if (apps.length > 0) {
+        for (const a of apps) {
+          appsHtml += `
+            <div class="model-list-item">
+              <div>
+                <div class="ml-name">${a.name}</div>
+                <div class="ml-meta">
+                  <span class="status-dot ${a.ready ? 'green' : 'yellow'}"></span>
+                  ${a.ready_replicas}/${a.replicas} ready &bull; ${a.namespace}
+                </div>
+                <div class="ml-meta">${a.image}</div>
+              </div>
+              <div class="ml-actions">
+                <button class="btn btn-danger btn-sm" onclick="deleteApp('${cluster.name}', '${a.namespace}', '${a.name}')">✕</button>
+              </div>
+            </div>
+          `;
+        }
+      }
+    } catch (e) {}
+
+    const healthDot = cluster.health || 'red';
+    const healthLabel = cluster.health_details || (cluster.reachable ? 'healthy' : 'unreachable');
+    const gpuInfo = cluster.gpu_count ? ` &bull; ${cluster.gpu_count} GPU${cluster.gpu_count > 1 ? 's' : ''} avg ${cluster.gpu_avg}%` : '';
+
+    let detailsHtml = '';
+    if (details) {
+      detailsHtml += `
+        <div style="background:#1a1a1a; border-radius:4px; padding:10px; margin-bottom:12px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:12px;">
+            <div><span style="color:#999;">OCP Version</span><br>${details.ocp_version}</div>
+            <div><span style="color:#999;">Platform</span><br>${details.platform}</div>
+            <div><span style="color:#999;">Health</span><br><span class="status-dot ${healthDot}"></span>${healthLabel}${gpuInfo}</div>
+            <div><span style="color:#999;">Region</span><br>${cluster.region || 'unknown'}</div>
+          </div>
+        </div>
+      `;
+
+      const comps = Object.entries(details.rhoai_components || {});
+      if (comps.length > 0) {
+        detailsHtml += `
+          <h2 style="font-size:12px; color:#ee0000; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
+            RHOAI Components (${comps.length})
+          </h2>
+        `;
+        for (const [display, info] of comps) {
+          detailsHtml += `
+            <div style="background:#1a1a1a; border-radius:4px; padding:8px 10px; margin-bottom:4px; font-size:12px;">
+              <div style="font-weight:500; font-size:13px;">${display}</div>
+              <div style="color:#999;">${info.version} &bull;
+                <span class="status-dot ${info.phase === 'Succeeded' ? 'green' : 'yellow'}"></span>${info.phase}
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      if (details.topology && details.topology.length > 0) {
+        detailsHtml += `
+          <h2 style="font-size:12px; color:#ee0000; text-transform:uppercase; letter-spacing:1px; margin:12px 0 8px;">
+            Topology (${details.topology.length} nodes)
+          </h2>
+        `;
+        for (const n of details.topology) {
+          const gpuBadge = parseInt(n.gpu) > 0
+            ? `<span style="background:#ee0000; color:#fff; padding:1px 6px; border-radius:3px; font-size:10px; margin-left:4px;">GPU:${n.gpu}</span>`
+            : '';
+          detailsHtml += `
+            <div style="background:#1a1a1a; border-radius:4px; padding:8px 10px; margin-bottom:4px; font-size:12px;">
+              <div style="font-weight:500; font-size:13px;">
+                <span class="status-dot ${n.ready ? 'green' : 'red'}"></span>
+                ${n.name}${gpuBadge}
+              </div>
+              <div style="color:#999;">
+                ${n.roles.join(', ')} &bull; ${n.cpu} CPU &bull; ${n.memory}
+                ${n.instance_type ? '&bull; ' + n.instance_type : ''}
+                ${n.zone ? '&bull; ' + n.zone : ''}
+              </div>
+            </div>
+          `;
+        }
+      }
+    }
+
+    panel.innerHTML = `
+      <h3 style="display:flex; justify-content:space-between; align-items:center;">
+        ${cluster.display_name}
+        <button class="btn btn-outline btn-sm" onclick="refreshCluster('${cluster.name}')" style="width:auto; font-size:11px;">Refresh</button>
+      </h3>
+      <div class="status" style="margin-bottom:12px;">
+        <span class="status-dot ${cluster.reachable ? 'green' : 'red'}"></span>
+        ${cluster.reachable ? 'Connected' : 'Unreachable'}
+        &bull; ${cluster.ready_nodes}/${cluster.node_count} nodes ready
+      </div>
+      ${detailsHtml}
+      <h2 style="font-size: 12px; color: #ee0000; text-transform: uppercase; letter-spacing: 1px; margin: 12px 0 8px;">
+        Running Models (${models.length})
+      </h2>
+      ${modelsHtml}
+      ${appsHtml ? `
+        <h2 style="font-size: 12px; color: #0088cc; text-transform: uppercase; letter-spacing: 1px; margin: 12px 0 8px;">
+          Apps (${appsHtml.split('model-list-item').length - 1})
+        </h2>
+        ${appsHtml}
+      ` : ''}
+      <button class="btn btn-outline" style="margin-top: 8px;" onclick="removeCluster('${cluster.name}')">
+        Remove Cluster
+      </button>
+    `;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    panel.innerHTML += `<div style="color: #ff4444; font-size: 12px;">${e.message}</div>`;
+  }
+}
+
+function selectApp(el) {
+  document.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'));
+  if (selectedApp && selectedApp === el) {
+    selectedApp = null;
+    toast('Selection cleared');
+    return;
+  }
+  el.classList.add('selected');
+  selectedApp = el;
+  toast('Now click a cluster on the map to deploy');
+}
+
+function toggleCpuOnly() {
+  const cpuOnly = document.getElementById('deploy-cpu-only').checked;
+  document.getElementById('deploy-gpu-row').style.display = cpuOnly ? 'none' : 'block';
+}
+
+function openDeployDialog(clusterName) {
+  if (!selectedApp) return;
+  const appType = selectedApp.dataset.type;
+  document.getElementById('deploy-cluster').value = clusterName;
+  const gpuRow = document.getElementById('deploy-gpu-row');
+  const modelIdInput = document.getElementById('deploy-model-id');
+  const modelIdLabel = document.getElementById('deploy-model-id-label');
+  const cpuCheckbox = document.getElementById('deploy-cpu-only');
+
+  document.getElementById('deploy-dialog-title').textContent = appType === 'model' ? 'Deploy Model' : 'Deploy App';
+
+  if (appType === 'model') {
+    modelIdLabel.textContent = 'Model';
+    modelIdInput.value = selectedApp.dataset.modelId;
+    document.getElementById('deploy-namespace').value = selectedApp.dataset.modelName;
+    document.getElementById('deploy-replicas').value = '1';
+    document.getElementById('deploy-gpus').value = selectedApp.dataset.gpus || '1';
+    cpuCheckbox.checked = false;
+    cpuCheckbox.parentElement.parentElement.style.display = 'block';
+    gpuRow.style.display = 'block';
+  } else {
+    modelIdLabel.textContent = 'Image';
+    modelIdInput.value = selectedApp.dataset.image;
+    document.getElementById('deploy-namespace').value = selectedApp.dataset.appName;
+    document.getElementById('deploy-replicas').value = '1';
+    cpuCheckbox.checked = false;
+    cpuCheckbox.parentElement.parentElement.style.display = 'none';
+    gpuRow.style.display = 'none';
+  }
+  document.getElementById('deploy-overlay').style.display = 'block';
+  document.getElementById('deploy-dialog').style.display = 'block';
+}
+
+function closeDeployDialog() {
+  document.getElementById('deploy-overlay').style.display = 'none';
+  document.getElementById('deploy-dialog').style.display = 'none';
+}
+
+async function submitDeploy() {
+  const appType = selectedApp ? selectedApp.dataset.type : 'model';
+  const clusterName = document.getElementById('deploy-cluster').value;
+  const ns = document.getElementById('deploy-namespace').value;
+  const replicas = parseInt(document.getElementById('deploy-replicas').value);
+  const deployName = ns;
+
+  closeDeployDialog();
+  document.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'));
+  selectedApp = null;
+  toast(`Deploying ${deployName} on ${clusterName}...`, 5000);
+
+  try {
+    if (appType === 'app') {
+      const image = document.getElementById('deploy-model-id').value;
+      await fetchJSON(`/api/clusters/${clusterName}/apps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app_name: deployName, image, namespace: ns, replicas }),
+      });
+    } else {
+      const modelId = document.getElementById('deploy-model-id').value;
+      const cpuOnly = document.getElementById('deploy-cpu-only').checked;
+      const gpus = cpuOnly ? 0 : parseInt(document.getElementById('deploy-gpus').value);
+      await fetchJSON(`/api/clusters/${clusterName}/models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model_name: deployName,
+          model_id: modelId,
+          namespace: ns,
+          replicas,
+          gpu_count: gpus,
+          cpu_only: cpuOnly,
+        }),
+      });
+    }
+    toast(`Deployed ${deployName} on ${clusterName}`);
+    const cluster = clusters.find(c => c.name === clusterName);
+    if (cluster) showClusterInfo(cluster);
+  } catch (e) {
+    toast(`Deploy failed: ${e.message}`, 5000);
+  }
+}
+
+async function deleteApp(clusterName, ns, appName) {
+  if (!confirm(`Delete app ${appName} from ${clusterName}?`)) return;
+  toast(`Deleting ${appName}...`);
+  try {
+    await fetchJSON(`/api/clusters/${clusterName}/apps/${ns}/${appName}`, { method: 'DELETE' });
+    toast(`Deleted ${appName}`);
+    const cluster = clusters.find(c => c.name === clusterName);
+    if (cluster) showClusterInfo(cluster);
+  } catch (e) {
+    toast(`Delete failed: ${e.message}`, 5000);
+  }
+}
+
+async function deleteModel(clusterName, ns, modelName) {
+  if (!confirm(`Delete ${modelName} from ${clusterName}?`)) return;
+  toast(`Deleting ${modelName}...`);
+  try {
+    await fetchJSON(`/api/clusters/${clusterName}/models/${ns}/${modelName}`, { method: 'DELETE' });
+    toast(`Deleted ${modelName}`);
+    const cluster = clusters.find(c => c.name === clusterName);
+    if (cluster) showClusterInfo(cluster);
+  } catch (e) {
+    toast(`Delete failed: ${e.message}`, 5000);
+  }
+}
+
+function startDragModel(event, clusterName, ns, modelName, modelId) {
+  draggedModel = { clusterName, ns, modelName, modelId };
+  event.dataTransfer.setData('text/plain', modelName);
+  Object.entries(markers).forEach(([name, marker]) => {
+    if (name !== clusterName) {
+      const el = marker.getElement ? marker.getElement() : null;
+      if (el) { el.style.filter = 'brightness(1.5)'; el.style.transform += ' scale(1.3)'; }
+    }
+  });
+}
+
+function endDragModel() {
+  draggedModel = null;
+  Object.values(markers).forEach(marker => {
+    const el = marker.getElement ? marker.getElement() : null;
+    if (el) { el.style.filter = ''; el.style.transform = el.style.transform.replace(' scale(1.3)', ''); }
+  });
+}
+
+Object.values(markers).forEach(marker => {
+  const el = marker.getElement();
+  if (el) {
+    el.addEventListener('dragover', e => e.preventDefault());
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      if (draggedModel && marker.clusterName !== draggedModel.clusterName) {
+        moveModel(draggedModel, marker.clusterName);
+      }
+    });
+  }
+});
+
+function setupDropTargets() {
+  Object.entries(markers).forEach(([name, marker]) => {
+    const el = marker.getElement();
+    if (el) {
+      el.addEventListener('dragover', e => e.preventDefault());
+      el.addEventListener('drop', e => {
+        e.preventDefault();
+        if (draggedModel && name !== draggedModel.clusterName) {
+          moveModel(draggedModel, name);
+        }
+      });
+    }
+  });
+}
+
+async function moveModel(model, targetCluster) {
+  const { clusterName, ns, modelName } = model;
+  if (!confirm(`Move ${modelName} from ${clusterName} to ${targetCluster}?`)) return;
+  toast(`Moving ${modelName} to ${targetCluster}...`, 5000);
+  try {
+    await fetchJSON(`/api/clusters/${clusterName}/models/${ns}/${modelName}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_cluster: targetCluster }),
+    });
+    toast(`Moved ${modelName} to ${targetCluster}`);
+    loadClusters();
+  } catch (e) {
+    toast(`Move failed: ${e.message}`, 5000);
+  }
+}
+
+function toggleAddCluster() {
+  const form = document.getElementById('add-cluster-form');
+  if (form.style.display === 'block') {
+    form.style.display = 'none';
+    addingCluster = false;
+  } else {
+    form.style.display = 'block';
+    addingCluster = true;
+    toast('Click on the map to set cluster location');
+  }
+}
+
+map.on('click', function(e) {
+  if (addingCluster) {
+    document.getElementById('new-cluster-lat').value = e.latlng.lat.toFixed(4);
+    document.getElementById('new-cluster-lon').value = e.latlng.lng.toFixed(4);
+    document.getElementById('new-cluster-location').value = `${e.latlng.lat.toFixed(2)}, ${e.latlng.lng.toFixed(2)}`;
+  }
+});
+
+async function addCluster() {
+  const name = document.getElementById('new-cluster-name').value.trim();
+  const display = document.getElementById('new-cluster-display').value.trim();
+  const kubeconfig = document.getElementById('new-cluster-kubeconfig').value.trim();
+  const lat = parseFloat(document.getElementById('new-cluster-lat').value);
+  const lon = parseFloat(document.getElementById('new-cluster-lon').value);
+
+  if (!name || !kubeconfig || isNaN(lat)) {
+    toast('Fill in all fields and click on the map for location');
+    return;
+  }
+
+  toast('Registering cluster...');
+  try {
+    await fetchJSON('/api/clusters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        display_name: display || name,
+        kubeconfig_path: kubeconfig,
+        lat, lon,
+      }),
+    });
+    toast(`Cluster ${name} registered`);
+    document.getElementById('add-cluster-form').style.display = 'none';
+    addingCluster = false;
+    loadClusters().then(setupDropTargets);
+  } catch (e) {
+    toast(`Registration failed: ${e.message}`, 5000);
+  }
+}
+
+async function removeCluster(name) {
+  if (!confirm(`Remove cluster ${name} from the dashboard?`)) return;
+  try {
+    await fetchJSON(`/api/clusters/${name}`, { method: 'DELETE' });
+    toast(`Removed ${name}`);
+    document.getElementById('info-panel').innerHTML =
+      '<div style="color: #666; font-size: 13px; text-align: center; padding: 40px 0;">Click a cluster marker on the map to view details</div>';
+    loadClusters().then(setupDropTargets);
+  } catch (e) {
+    toast(`Remove failed: ${e.message}`, 5000);
+  }
+}
+
+function toggleSection(id) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(id + '-arrow');
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+    arrow.textContent = '▼';
+  } else {
+    el.style.display = 'none';
+    arrow.textContent = '▶';
+  }
+}
+
+async function refreshCluster(name) {
+  toast('Refreshing...');
+  await loadClusters();
+  setupDropTargets();
+  const cluster = clusters.find(c => c.name === name);
+  if (cluster) showClusterInfo(cluster);
+}
+
+let wizardMode = null;
+
+function openCustomModelWizard() {
+  wizardMode = 'model';
+  document.getElementById('wizard-title').textContent = 'Add Custom Model';
+  document.getElementById('wizard-model-fields').style.display = 'block';
+  document.getElementById('wizard-app-fields').style.display = 'none';
+  document.getElementById('wiz-model-display').value = '';
+  document.getElementById('wiz-model-id').value = '';
+  document.getElementById('wiz-model-gpus').value = '1';
+  document.getElementById('wizard-overlay').style.display = 'block';
+  document.getElementById('wizard-dialog').style.display = 'block';
+}
+
+function openCustomAppWizard() {
+  wizardMode = 'app';
+  document.getElementById('wizard-title').textContent = 'Add Custom App';
+  document.getElementById('wizard-title').style.color = '#0088cc';
+  document.getElementById('wizard-model-fields').style.display = 'none';
+  document.getElementById('wizard-app-fields').style.display = 'block';
+  document.getElementById('wiz-app-display').value = '';
+  document.getElementById('wiz-app-image').value = '';
+  document.getElementById('wizard-overlay').style.display = 'block';
+  document.getElementById('wizard-dialog').style.display = 'block';
+}
+
+function closeWizard() {
+  document.getElementById('wizard-overlay').style.display = 'none';
+  document.getElementById('wizard-dialog').style.display = 'none';
+  document.getElementById('wizard-title').style.color = '#ee0000';
+  wizardMode = null;
+}
+
+function submitWizard() {
+  if (wizardMode === 'model') {
+    const display = document.getElementById('wiz-model-display').value.trim();
+    const modelId = document.getElementById('wiz-model-id').value.trim();
+    const gpus = document.getElementById('wiz-model-gpus').value;
+    if (!display || !modelId) { toast('Fill in all fields'); return; }
+    const slug = display.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+    const card = document.createElement('div');
+    card.className = 'model-card';
+    card.dataset.type = 'model';
+    card.dataset.modelId = modelId;
+    card.dataset.modelName = slug;
+    card.dataset.gpus = gpus;
+    card.onclick = function() { selectApp(this); };
+    card.innerHTML = `<div class="model-title">${display}</div><div class="model-sub">${modelId} &bull; ${gpus} GPU${gpus > 1 ? 's' : ''}</div>`;
+    document.getElementById('apps-library').appendChild(card);
+    toast(`Added ${display} to model library`);
+  } else {
+    const display = document.getElementById('wiz-app-display').value.trim();
+    const image = document.getElementById('wiz-app-image').value.trim();
+    if (!display || !image) { toast('Fill in all fields'); return; }
+    const slug = display.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+    const card = document.createElement('div');
+    card.className = 'model-card';
+    card.style.borderLeftColor = '#0088cc';
+    card.dataset.type = 'app';
+    card.dataset.image = image;
+    card.dataset.appName = slug;
+    card.onclick = function() { selectApp(this); };
+    card.innerHTML = `<div class="model-title">${display}</div><div class="model-sub">${image}</div>`;
+    document.getElementById('apps-container').appendChild(card);
+    toast(`Added ${display} to app library`);
+  }
+  closeWizard();
+}
+
+async function loadLinks() {
+  try {
+    linksData = await fetchJSON('/api/links');
+  } catch (e) {
+    linksData = [];
+  }
+  linkLines.forEach(l => map.removeLayer(l));
+  linkLines = [];
+
+  for (const link of linksData) {
+    const ca = clusters.find(c => c.name === link.cluster_a);
+    const cb = clusters.find(c => c.name === link.cluster_b);
+    if (!ca || !cb) continue;
+    const line = L.polyline(
+      [[ca.lat, ca.lon], [cb.lat, cb.lon]],
+      { color: '#ff8800', weight: 2, dashArray: '8, 6', opacity: 0.8 }
+    ).addTo(map);
+    line.bindTooltip(`${link.model_id} (linked)`, { sticky: true });
+    line.linkId = link.id;
+    linkLines.push(line);
+  }
+
+  renderLinksList();
+}
+
+function renderLinksList() {
+  const el = document.getElementById('links-list');
+  if (!linksData.length) {
+    el.innerHTML = '<div style="color:#666; font-size:12px;">No active links</div>';
+    return;
+  }
+  el.innerHTML = linksData.map(link => `
+    <div style="background:#2a2a2a; border-left:3px solid #ff8800; border-radius:4px; padding:8px 10px; margin-bottom:6px; font-size:12px;">
+      <div style="font-weight:500; font-size:13px;">${link.model_id}</div>
+      <div style="color:#999;">${link.cluster_a} ↔ ${link.cluster_b}</div>
+      <button class="btn btn-danger btn-sm" style="margin-top:4px;" onclick="deleteLink('${link.id}')">Remove</button>
+    </div>
+  `).join('');
+}
+
+function openLinkWizard() {
+  const selA = document.getElementById('link-cluster-a');
+  const selB = document.getElementById('link-cluster-b');
+  const reachable = clusters.filter(c => c.reachable);
+  selA.innerHTML = reachable.map(c => `<option value="${c.name}">${c.display_name}</option>`).join('');
+  selB.innerHTML = reachable.map(c => `<option value="${c.name}">${c.display_name}</option>`).join('');
+  if (reachable.length > 1) selB.selectedIndex = 1;
+  document.getElementById('link-overlay').style.display = 'block';
+  document.getElementById('link-dialog').style.display = 'block';
+}
+
+function closeLinkWizard() {
+  document.getElementById('link-overlay').style.display = 'none';
+  document.getElementById('link-dialog').style.display = 'none';
+}
+
+async function submitLink() {
+  const model_name = document.getElementById('link-model-name').value.trim();
+  const model_namespace = document.getElementById('link-model-ns').value.trim();
+  const model_id = document.getElementById('link-model-id').value.trim();
+  const cluster_a = document.getElementById('link-cluster-a').value;
+  const cluster_b = document.getElementById('link-cluster-b').value;
+
+  if (!model_name || !model_namespace || !model_id) {
+    toast('Fill in all fields');
+    return;
+  }
+  if (cluster_a === cluster_b) {
+    toast('Pick two different clusters');
+    return;
+  }
+
+  closeLinkWizard();
+  toast('Creating link...', 5000);
+
+  try {
+    await fetchJSON('/api/links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_name, model_namespace, model_id, cluster_a, cluster_b }),
+    });
+    toast('Link created');
+    await loadLinks();
+  } catch (e) {
+    toast(`Link failed: ${e.message}`, 5000);
+  }
+}
+
+async function deleteLink(linkId) {
+  if (!confirm('Remove this model link?')) return;
+  toast('Removing link...');
+  try {
+    await fetchJSON(`/api/links/${linkId}`, { method: 'DELETE' });
+    toast('Link removed');
+    await loadLinks();
+  } catch (e) {
+    toast(`Remove failed: ${e.message}`, 5000);
+  }
+}
+
+loadClusters().then(() => { setupDropTargets(); loadLinks(); });
+</script>
+</body>
+</html>
