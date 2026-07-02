@@ -10,6 +10,43 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #fff; height: 100vh; overflow: hidden; }
 
+@keyframes sonar-pulse {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0.9; }
+  100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+}
+.sonar-container {
+  position: relative; width: 28px; height: 28px;
+}
+.sonar-ring {
+  position: absolute; top: 50%; left: 50%;
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid #00cc66;
+  transform: translate(-50%, -50%) scale(0.3);
+  animation: sonar-pulse 1.5s ease-out infinite;
+}
+.sonar-ring:nth-child(2) { animation-delay: 0.3s; }
+.sonar-ring:nth-child(3) { animation-delay: 0.6s; }
+.sonar-dot {
+  position: absolute; top: 50%; left: 50%;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #00cc66;
+  transform: translate(-50%, -50%);
+}
+
+.cluster-marker-dot {
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(0,204,102,0.4);
+  transition: transform 0.2s, filter 0.2s;
+}
+
+@keyframes marker-appear {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.cluster-marker-dot.animate-in {
+  animation: marker-appear 0.3s ease-out forwards;
+}
+
 #header {
   height: 48px; background: #0c0c0c; border-bottom: 2px solid #ee0000;
   display: flex; align-items: center; padding: 0 20px; z-index: 1000;
@@ -17,7 +54,7 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
 #header h1 { font-size: 18px; font-weight: 600; color: #fff; }
 #header h1 span { color: #ee0000; }
 
-#main { display: flex; height: calc(100vh - 48px); }
+#main { display: flex; height: calc(100vh - 48px - 56px); }
 
 #map-container { flex: 1; position: relative; }
 #map { width: 100%; height: 100%; }
@@ -110,6 +147,40 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
 
 #add-cluster-form { display: none; }
 .cluster-marker { background: none !important; border: none !important; }
+
+#metrics-strip {
+  position: fixed; bottom: 0; left: 0; right: 320px;
+  height: 56px; background: #0c0c0c; border-top: 1px solid #333;
+  display: flex; align-items: center; justify-content: space-around;
+  z-index: 1000; padding: 0 20px;
+}
+.metric-cell { text-align: center; flex: 1; }
+.metric-value { font-size: 20px; font-weight: 700; color: #00cc66; }
+.metric-label { font-size: 10px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; }
+#ms-chart-toggle {
+  cursor: pointer; padding: 6px 12px; border: 1px solid #333; border-radius: 4px;
+  background: transparent; color: #999; font-size: 12px; font-family: inherit;
+  transition: background 0.2s;
+}
+#ms-chart-toggle:hover { background: #333; color: #fff; }
+
+#chart-panel {
+  position: fixed; bottom: 56px; left: 0; right: 320px;
+  height: 260px; background: #0c0c0c; border-top: 1px solid #333;
+  z-index: 999; padding: 12px 20px; display: none;
+}
+#chart-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+}
+#chart-header h2 { font-size: 14px; color: #ee0000; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
+#chart-window-btns { display: flex; gap: 4px; }
+#chart-window-btns button {
+  padding: 4px 10px; border: 1px solid #333; border-radius: 3px;
+  background: transparent; color: #999; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+#chart-window-btns button.active { background: #ee0000; color: #fff; border-color: #ee0000; }
+#chart-container { height: 200px; }
 </style>
 </head>
 <body>
@@ -128,35 +199,35 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
       <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('apps-library-wrap')">Models <span id="apps-library-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
       <div id="apps-library-wrap">
       <div id="apps-library">
-        <div class="model-card" data-type="model" data-model-id="Qwen/Qwen3-0.6B" data-model-name="qwen3-0-6b" data-gpus="1" onclick="selectApp(this)">
+        <div class="model-card" data-type="model" data-model-id="Qwen/Qwen3-0.6B" data-model-name="qwen3-0-6b" data-gpus="1" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)">
           <div class="model-title">Qwen3-0.6B</div>
           <div class="model-sub">Qwen/Qwen3-0.6B &bull; 1 GPU</div>
         </div>
-        <div class="model-card" data-type="model" data-model-id="Qwen/Qwen3-14B" data-model-name="qwen3-14b" data-gpus="2" onclick="selectApp(this)">
+        <div class="model-card" data-type="model" data-model-id="Qwen/Qwen3-14B" data-model-name="qwen3-14b" data-gpus="2" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)">
           <div class="model-title">Qwen3-14B</div>
           <div class="model-sub">Qwen/Qwen3-14B &bull; 2 GPUs</div>
         </div>
-        <div class="model-card" data-type="model" data-model-id="meta-llama/Llama-4-Scout-17B-16E-Instruct" data-model-name="llama4-scout" data-gpus="4" onclick="selectApp(this)">
+        <div class="model-card" data-type="model" data-model-id="meta-llama/Llama-4-Scout-17B-16E-Instruct" data-model-name="llama4-scout" data-gpus="4" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)">
           <div class="model-title">Llama 4 Scout</div>
           <div class="model-sub">meta-llama/Llama-4-Scout &bull; 4 GPUs</div>
         </div>
-        <div class="model-card" data-type="model" data-model-id="mistralai/Mistral-7B-Instruct-v0.3" data-model-name="mistral-7b" data-gpus="1" onclick="selectApp(this)">
+        <div class="model-card" data-type="model" data-model-id="mistralai/Mistral-7B-Instruct-v0.3" data-model-name="mistral-7b" data-gpus="1" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)">
           <div class="model-title">Mistral 7B</div>
           <div class="model-sub">mistralai/Mistral-7B &bull; 1 GPU</div>
         </div>
-        <div class="model-card" data-type="model" data-model-id="ibm-granite/granite-3.3-8b-instruct" data-model-name="granite-8b" data-gpus="1" onclick="selectApp(this)">
+        <div class="model-card" data-type="model" data-model-id="ibm-granite/granite-3.3-8b-instruct" data-model-name="granite-8b" data-gpus="1" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)">
           <div class="model-title">Granite 3.3 8B</div>
           <div class="model-sub">ibm-granite/granite-3.3-8b &bull; 1 GPU</div>
         </div>
-        <div class="model-card" data-type="model" data-model-id="google/gemma-3-4b-it" data-model-name="gemma3-4b" data-gpus="1" onclick="selectApp(this)">
+        <div class="model-card" data-type="model" data-model-id="google/gemma-3-4b-it" data-model-name="gemma3-4b" data-gpus="1" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)">
           <div class="model-title">Gemma 3 4B</div>
           <div class="model-sub">google/gemma-3-4b-it &bull; 1 GPU</div>
         </div>
-        <div class="model-card" data-type="model" data-model-id="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B" data-model-name="deepseek-r1-7b" data-gpus="1" onclick="selectApp(this)">
+        <div class="model-card" data-type="model" data-model-id="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B" data-model-name="deepseek-r1-7b" data-gpus="1" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)">
           <div class="model-title">DeepSeek R1 7B</div>
           <div class="model-sub">deepseek-ai/DeepSeek-R1 &bull; 1 GPU</div>
         </div>
-        <div class="model-card" data-type="model" data-model-id="microsoft/Phi-4-mini-instruct" data-model-name="phi4-mini" data-gpus="1" onclick="selectApp(this)">
+        <div class="model-card" data-type="model" data-model-id="microsoft/Phi-4-mini-instruct" data-model-name="phi4-mini" data-gpus="1" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)">
           <div class="model-title">Phi-4 Mini</div>
           <div class="model-sub">microsoft/Phi-4-mini &bull; 1 GPU</div>
         </div>
@@ -169,11 +240,11 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
       <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('apps-container-wrap')">Apps <span id="apps-container-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
       <div id="apps-container-wrap">
       <div id="apps-container">
-        <div class="model-card" data-type="app" data-image="quay.io/mavazque/reversewords:latest" data-app-name="reversewords" onclick="selectApp(this)" style="border-left-color: #0088cc;">
+        <div class="model-card" data-type="app" data-image="quay.io/mavazque/reversewords:latest" data-app-name="reversewords" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)" style="border-left-color: #0088cc;">
           <div class="model-title">Reverse Words</div>
           <div class="model-sub">quay.io/mavazque/reversewords</div>
         </div>
-        <div class="model-card" data-type="app" data-image="quay.io/karmab/kdummy:latest" data-app-name="kdummy" onclick="selectApp(this)" style="border-left-color: #0088cc;">
+        <div class="model-card" data-type="app" data-image="quay.io/karmab/kdummy:latest" data-app-name="kdummy" draggable="true" ondragstart="startDragSidebarItem(event, this)" ondragend="endDragSidebarItem()" onclick="selectApp(this)" style="border-left-color: #0088cc;">
           <div class="model-title">KDummy</div>
           <div class="model-sub">quay.io/karmab/kdummy</div>
         </div>
@@ -325,7 +396,49 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
 
 <div id="toast"></div>
 
+<div id="chart-panel">
+  <div id="chart-header">
+    <h2>Fleet Metrics</h2>
+    <div id="chart-window-btns">
+      <button class="active" onclick="loadTimeseries('1h')">1h</button>
+      <button onclick="loadTimeseries('6h')">6h</button>
+      <button onclick="loadTimeseries('24h')">24h</button>
+    </div>
+    <button class="btn btn-sm" style="padding:4px 10px; font-size:11px;" onclick="toggleChartPanel()">Close</button>
+  </div>
+  <div id="chart-container">
+    <canvas id="fleet-chart"></canvas>
+  </div>
+</div>
+
+<div id="metrics-strip">
+  <div class="metric-cell">
+    <div class="metric-value" id="ms-gpus">--</div>
+    <div class="metric-label">Total GPUs</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-value" id="ms-util">--</div>
+    <div class="metric-label">GPU Utilization</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-value" id="ms-tps">--</div>
+    <div class="metric-label">Tokens/sec</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-value" id="ms-models">--</div>
+    <div class="metric-label">Active Models</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-value" id="ms-clusters">--</div>
+    <div class="metric-label">Active Clusters</div>
+  </div>
+  <div class="metric-cell">
+    <button id="ms-chart-toggle" onclick="toggleChartPanel()">▲ Chart</button>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
 const map = L.map('map', { zoomControl: false, minZoom: 3, maxZoom: 12 }).setView([39.5, -98.5], 4);
 L.control.zoom({ position: 'topright' }).addTo(map);
@@ -340,6 +453,7 @@ let markers = {};
 let selectedApp = null;
 let addingCluster = false;
 let draggedModel = null;
+let draggedSidebarItem = null;
 let linkLines = [];
 let linksData = [];
 
@@ -392,15 +506,40 @@ async function loadClusters() {
     yellow: { fill: '#ffcc00', border: '#ffdd44' },
     red: { fill: '#ee0000', border: '#ff4444' },
   };
+
+  const sonarMarkers = [];
   for (const c of clusters) {
     const hc = healthColors[c.health] || healthColors.red;
-    const marker = L.circleMarker([c.lat, c.lon], {
-      radius: 12,
-      fillColor: hc.fill,
-      color: hc.border,
-      weight: 3,
-      opacity: 1,
-      fillOpacity: 0.9,
+    const sonar = L.marker([c.lat, c.lon], {
+      interactive: false,
+      icon: L.divIcon({
+        className: '',
+        html: `<div class="sonar-container">
+          <div class="sonar-ring" style="border-color:${hc.fill}"></div>
+          <div class="sonar-ring" style="border-color:${hc.fill}"></div>
+          <div class="sonar-ring" style="border-color:${hc.fill}"></div>
+          <div class="sonar-dot" style="background:${hc.fill}"></div>
+        </div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      }),
+    }).addTo(map);
+    sonarMarkers.push(sonar);
+  }
+
+  await new Promise(r => setTimeout(r, 1500));
+
+  sonarMarkers.forEach(m => map.removeLayer(m));
+
+  for (const c of clusters) {
+    const hc = healthColors[c.health] || healthColors.red;
+    const marker = L.marker([c.lat, c.lon], {
+      icon: L.divIcon({
+        className: '',
+        html: `<div class="cluster-marker-dot animate-in" style="width:24px; height:24px; background:${hc.fill}; border:3px solid ${hc.border};"></div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      }),
     }).addTo(map).on('click', () => showClusterInfo(c));
 
     marker.clusterName = c.name;
@@ -475,6 +614,7 @@ async function showClusterInfo(cluster) {
                   ${a.ready_replicas}/${a.replicas} ready &bull; ${a.namespace}
                 </div>
                 <div class="ml-meta">${a.image}</div>
+                ${a.route_url ? `<div class="ml-meta"><a href="${a.route_url}" target="_blank" style="color:#0088cc; text-decoration:none;">↗ ${a.route_url}</a></div>` : ''}
               </div>
               <div class="ml-actions">
                 <button class="btn btn-danger btn-sm" onclick="deleteApp('${cluster.name}', '${a.namespace}', '${a.name}')">✕</button>
@@ -596,9 +736,10 @@ function toggleCpuOnly() {
   document.getElementById('deploy-gpu-row').style.display = cpuOnly ? 'none' : 'block';
 }
 
-function openDeployDialog(clusterName) {
-  if (!selectedApp) return;
-  const appType = selectedApp.dataset.type;
+function openDeployDialog(clusterName, appData) {
+  const data = appData || (selectedApp ? selectedApp.dataset : null);
+  if (!data) return;
+  const appType = data.type;
   document.getElementById('deploy-cluster').value = clusterName;
   const gpuRow = document.getElementById('deploy-gpu-row');
   const modelIdInput = document.getElementById('deploy-model-id');
@@ -609,17 +750,17 @@ function openDeployDialog(clusterName) {
 
   if (appType === 'model') {
     modelIdLabel.textContent = 'Model';
-    modelIdInput.value = selectedApp.dataset.modelId;
-    document.getElementById('deploy-namespace').value = selectedApp.dataset.modelName;
+    modelIdInput.value = data.modelId;
+    document.getElementById('deploy-namespace').value = data.modelName;
     document.getElementById('deploy-replicas').value = '1';
-    document.getElementById('deploy-gpus').value = selectedApp.dataset.gpus || '1';
+    document.getElementById('deploy-gpus').value = data.gpus || '1';
     cpuCheckbox.checked = false;
     cpuCheckbox.parentElement.parentElement.style.display = 'block';
     gpuRow.style.display = 'block';
   } else {
     modelIdLabel.textContent = 'Image';
-    modelIdInput.value = selectedApp.dataset.image;
-    document.getElementById('deploy-namespace').value = selectedApp.dataset.appName;
+    modelIdInput.value = data.image;
+    document.getElementById('deploy-namespace').value = data.appName;
     document.getElementById('deploy-replicas').value = '1';
     cpuCheckbox.checked = false;
     cpuCheckbox.parentElement.parentElement.style.display = 'none';
@@ -635,7 +776,7 @@ function closeDeployDialog() {
 }
 
 async function submitDeploy() {
-  const appType = selectedApp ? selectedApp.dataset.type : 'model';
+  const appType = document.getElementById('deploy-dialog-title').textContent.includes('App') ? 'app' : 'model';
   const clusterName = document.getElementById('deploy-cluster').value;
   const ns = document.getElementById('deploy-namespace').value;
   const replicas = parseInt(document.getElementById('deploy-replicas').value);
@@ -649,11 +790,17 @@ async function submitDeploy() {
   try {
     if (appType === 'app') {
       const image = document.getElementById('deploy-model-id').value;
-      await fetchJSON(`/api/clusters/${clusterName}/apps`, {
+      const appResult = await fetchJSON(`/api/clusters/${clusterName}/apps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ app_name: deployName, image, namespace: ns, replicas }),
       });
+      if (appResult.route_url) {
+        toast(`Deployed ${deployName} on ${clusterName} — ${appResult.route_url}`, 8000);
+        const cluster = clusters.find(c => c.name === clusterName);
+        if (cluster) showClusterInfo(cluster);
+        return;
+      }
     } else {
       const modelId = document.getElementById('deploy-model-id').value;
       const cpuOnly = document.getElementById('deploy-cpu-only').checked;
@@ -724,18 +871,27 @@ function endDragModel() {
   });
 }
 
-Object.values(markers).forEach(marker => {
-  const el = marker.getElement();
-  if (el) {
-    el.addEventListener('dragover', e => e.preventDefault());
-    el.addEventListener('drop', e => {
-      e.preventDefault();
-      if (draggedModel && marker.clusterName !== draggedModel.clusterName) {
-        moveModel(draggedModel, marker.clusterName);
-      }
-    });
-  }
-});
+function startDragSidebarItem(event, cardEl) {
+  const d = cardEl.dataset;
+  draggedSidebarItem = {
+    type: d.type,
+    modelId: d.modelId, modelName: d.modelName, gpus: d.gpus,
+    image: d.image, appName: d.appName,
+  };
+  event.dataTransfer.setData('text/plain', d.modelName || d.appName);
+  Object.values(markers).forEach(marker => {
+    const el = marker.getElement ? marker.getElement() : null;
+    if (el) { el.style.filter = 'brightness(1.5)'; el.style.transform += ' scale(1.3)'; }
+  });
+}
+
+function endDragSidebarItem() {
+  draggedSidebarItem = null;
+  Object.values(markers).forEach(marker => {
+    const el = marker.getElement ? marker.getElement() : null;
+    if (el) { el.style.filter = ''; el.style.transform = el.style.transform.replace(' scale(1.3)', ''); }
+  });
+}
 
 function setupDropTargets() {
   Object.entries(markers).forEach(([name, marker]) => {
@@ -744,7 +900,10 @@ function setupDropTargets() {
       el.addEventListener('dragover', e => e.preventDefault());
       el.addEventListener('drop', e => {
         e.preventDefault();
-        if (draggedModel && name !== draggedModel.clusterName) {
+        if (draggedSidebarItem) {
+          openDeployDialog(name, draggedSidebarItem);
+          draggedSidebarItem = null;
+        } else if (draggedModel && name !== draggedModel.clusterName) {
           moveModel(draggedModel, name);
         }
       });
@@ -901,6 +1060,9 @@ function submitWizard() {
     card.dataset.modelId = modelId;
     card.dataset.modelName = slug;
     card.dataset.gpus = gpus;
+    card.draggable = true;
+    card.ondragstart = function(e) { startDragSidebarItem(e, this); };
+    card.ondragend = endDragSidebarItem;
     card.onclick = function() { selectApp(this); };
     card.innerHTML = `<div class="model-title">${display}</div><div class="model-sub">${modelId} &bull; ${gpus} GPU${gpus > 1 ? 's' : ''}</div>`;
     document.getElementById('apps-library').appendChild(card);
@@ -916,6 +1078,9 @@ function submitWizard() {
     card.dataset.type = 'app';
     card.dataset.image = image;
     card.dataset.appName = slug;
+    card.draggable = true;
+    card.ondragstart = function(e) { startDragSidebarItem(e, this); };
+    card.ondragend = endDragSidebarItem;
     card.onclick = function() { selectApp(this); };
     card.innerHTML = `<div class="model-title">${display}</div><div class="model-sub">${image}</div>`;
     document.getElementById('apps-container').appendChild(card);
@@ -1024,7 +1189,103 @@ async function deleteLink(linkId) {
   }
 }
 
-loadClusters().then(() => { setupDropTargets(); loadLinks(); });
+async function loadMetricsSummary() {
+  try {
+    const data = await fetchJSON('/api/metrics/summary');
+    document.getElementById('ms-gpus').textContent = data.total_gpus;
+    document.getElementById('ms-util').textContent = data.gpu_utilization_pct != null ? data.gpu_utilization_pct + '%' : 'N/A';
+    document.getElementById('ms-tps').textContent = data.tokens_per_sec != null ? data.tokens_per_sec.toLocaleString() : 'N/A';
+    document.getElementById('ms-models').textContent = data.active_models;
+    document.getElementById('ms-clusters').textContent = data.active_clusters;
+  } catch (e) {
+    console.error('Metrics load failed:', e);
+  }
+}
+
+let fleetChart = null;
+
+function toggleChartPanel() {
+  const panel = document.getElementById('chart-panel');
+  const btn = document.getElementById('ms-chart-toggle');
+  if (panel.style.display === 'none' || !panel.style.display) {
+    panel.style.display = 'block';
+    btn.textContent = '▼ Chart';
+    loadTimeseries('1h');
+  } else {
+    panel.style.display = 'none';
+    btn.textContent = '▲ Chart';
+  }
+}
+
+async function loadTimeseries(window) {
+  document.querySelectorAll('#chart-window-btns button').forEach(b => {
+    b.classList.toggle('active', b.textContent === window);
+  });
+  try {
+    const data = await fetchJSON(`/api/metrics/timeseries?window=${window}`);
+    renderChart(data);
+  } catch (e) {
+    console.error('Timeseries load failed:', e);
+  }
+}
+
+function renderChart(data) {
+  const ctx = document.getElementById('fleet-chart').getContext('2d');
+  if (fleetChart) fleetChart.destroy();
+
+  const labels = (data.gpu_utilization.timestamps || []).map(ts =>
+    new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
+  );
+
+  const datasets = [];
+  if (data.gpu_utilization.values.length) {
+    datasets.push({
+      label: 'GPU Utilization %',
+      data: data.gpu_utilization.values,
+      borderColor: '#00cc66', backgroundColor: 'rgba(0,204,102,0.1)',
+      fill: true, tension: 0.3, yAxisID: 'y', borderWidth: 2, pointRadius: 0,
+    });
+  }
+  if (data.tokens_per_sec.values.length) {
+    datasets.push({
+      label: 'Tokens/sec',
+      data: data.tokens_per_sec.values,
+      borderColor: '#0088cc', backgroundColor: 'rgba(0,136,204,0.1)',
+      fill: false, tension: 0.3, yAxisID: 'y1', borderWidth: 2, pointRadius: 0,
+    });
+  }
+  if (data.queue_depth.values.length) {
+    datasets.push({
+      label: 'Queue Depth',
+      data: data.queue_depth.values,
+      borderColor: '#ff8800', backgroundColor: 'rgba(255,136,0,0.1)',
+      fill: false, tension: 0.3, yAxisID: 'y1', borderWidth: 2, pointRadius: 0,
+    });
+  }
+
+  if (!datasets.length) {
+    datasets.push({ label: 'No data', data: [], borderColor: '#666' });
+  }
+
+  fleetChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#ccc', font: { family: 'Red Hat Display', size: 11 } } } },
+      scales: {
+        x: { ticks: { color: '#666', maxTicksLimit: 12 }, grid: { color: '#222' } },
+        y: { position: 'left', min: 0, max: 100, ticks: { color: '#00cc66' }, grid: { color: '#222' },
+             title: { display: true, text: 'GPU %', color: '#00cc66', font: { size: 11 } } },
+        y1: { position: 'right', min: 0, ticks: { color: '#0088cc' }, grid: { drawOnChartArea: false },
+              title: { display: true, text: 'Count', color: '#0088cc', font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+loadClusters().then(() => { setupDropTargets(); loadLinks(); loadMetricsSummary(); });
+setInterval(loadMetricsSummary, 30000);
 </script>
 </body>
 </html>

@@ -2,13 +2,14 @@ import hashlib
 import json
 import os
 import ssl
+import time
 import traceback
 import urllib.request
 import yaml
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -98,52 +99,58 @@ REGION_COORDS = {
 GPU_YELLOW_THRESHOLD = 90
 
 
+def get_thanos_querier(cluster):
+    clients = get_k8s_clients(cluster["kubeconfig"])
+    custom = clients["custom"]
+    ingress = custom.get_cluster_custom_object(
+        group="config.openshift.io", version="v1",
+        plural="ingresses", name="cluster",
+        _request_timeout=K8S_TIMEOUT,
+    )
+    apps_domain = ingress["spec"]["domain"]
+    thanos_host = f"thanos-querier-openshift-monitoring.{apps_domain}"
+    token = clients["core"].create_namespaced_service_account_token(
+        name="prometheus-k8s",
+        namespace="openshift-monitoring",
+        body={
+            "apiVersion": "authentication.k8s.io/v1",
+            "kind": "TokenRequest",
+            "spec": {"expirationSeconds": 600},
+        },
+        _request_timeout=K8S_TIMEOUT,
+    ).status.token
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    def query_instant(promql):
+        url = f"https://{thanos_host}/api/v1/query?query={urllib.request.quote(promql)}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+            data = json.loads(resp.read())
+        return data.get("data", {}).get("result", [])
+
+    def query_range(promql, start, end, step):
+        url = (f"https://{thanos_host}/api/v1/query_range"
+               f"?query={urllib.request.quote(promql)}"
+               f"&start={start}&end={end}&step={step}")
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+            data = json.loads(resp.read())
+        return data.get("data", {}).get("result", [])
+
+    return query_instant, query_range
+
+
 def get_cluster_health(cluster):
     try:
-        clients = get_k8s_clients(cluster["kubeconfig"])
-        custom = clients["custom"]
+        query_instant, _ = get_thanos_querier(cluster)
 
-        try:
-            ingress = custom.get_cluster_custom_object(
-                group="config.openshift.io", version="v1",
-                plural="ingresses", name="cluster",
-                _request_timeout=K8S_TIMEOUT,
-            )
-            apps_domain = ingress["spec"]["domain"]
-        except Exception:
-            return {"health": "green", "health_details": "no metrics route"}
-
-        thanos_host = f"thanos-querier-openshift-monitoring.{apps_domain}"
-
-        try:
-            token = clients["core"].create_namespaced_service_account_token(
-                name="prometheus-k8s",
-                namespace="openshift-monitoring",
-                body={
-                    "apiVersion": "authentication.k8s.io/v1",
-                    "kind": "TokenRequest",
-                    "spec": {"expirationSeconds": 600},
-                },
-                _request_timeout=K8S_TIMEOUT,
-            ).status.token
-        except Exception:
-            return {"health": "green", "health_details": "cannot create SA token"}
-
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        def query_thanos(promql):
-            url = f"https://{thanos_host}/api/v1/query?query={urllib.request.quote(promql)}"
-            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
-            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
-                data = json.loads(resp.read())
-            return data.get("data", {}).get("result", [])
-
-        not_ready = query_thanos('kube_node_status_condition{condition="Ready",status="true"} == 0')
+        not_ready = query_instant('kube_node_status_condition{condition="Ready",status="true"} == 0')
         node_issues = len(not_ready)
 
-        gpu_results = query_thanos("DCGM_FI_DEV_GPU_UTIL")
+        gpu_results = query_instant("DCGM_FI_DEV_GPU_UTIL")
         gpu_utils = [float(r["value"][1]) for r in gpu_results if r["value"][1]]
         avg_gpu = sum(gpu_utils) / len(gpu_utils) if gpu_utils else 0
 
@@ -253,15 +260,33 @@ def list_apps(cluster):
     try:
         clients = get_k8s_clients(cluster["kubeconfig"])
         apps_api = client.AppsV1Api(clients["api_client"])
+        custom = clients["custom"]
         deployments = apps_api.list_deployment_for_all_namespaces(
             label_selector=GRID_LABEL, _request_timeout=K8S_TIMEOUT,
         )
+
+        route_map = {}
+        try:
+            routes = custom.list_cluster_custom_object(
+                group="route.openshift.io", version="v1",
+                plural="routes", label_selector=GRID_LABEL,
+                _request_timeout=K8S_TIMEOUT,
+            ).get("items", [])
+            for r in routes:
+                key = f"{r['metadata']['namespace']}/{r['metadata']['name']}"
+                host = r.get("spec", {}).get("host", "")
+                if host:
+                    route_map[key] = f"https://{host}"
+        except Exception:
+            pass
+
         apps = []
         for d in deployments.items:
             ready = (d.status.ready_replicas or 0) == (d.spec.replicas or 1)
             image = ""
             if d.spec.template.spec.containers:
                 image = d.spec.template.spec.containers[0].image
+            route_key = f"{d.metadata.namespace}/{d.metadata.name}"
             apps.append({
                 "name": d.metadata.name,
                 "namespace": d.metadata.namespace,
@@ -269,6 +294,7 @@ def list_apps(cluster):
                 "replicas": d.spec.replicas or 1,
                 "ready_replicas": d.status.ready_replicas or 0,
                 "ready": ready,
+                "route_url": route_map.get(route_key),
             })
         return apps
     except Exception:
@@ -834,7 +860,38 @@ def api_deploy_app(name: str, body: AppDeploy):
             if e.status != 409:
                 raise
 
-        return {"ok": True, "message": f"Deployed app {body.app_name} on {name}"}
+        route_url = None
+        try:
+            route_body = {
+                "apiVersion": "route.openshift.io/v1",
+                "kind": "Route",
+                "metadata": {
+                    "name": body.app_name,
+                    "namespace": body.namespace,
+                    "labels": {GRID_LABEL: "true"},
+                },
+                "spec": {
+                    "to": {"kind": "Service", "name": body.app_name, "weight": 100},
+                    "port": {"targetPort": 8080},
+                    "tls": {"termination": "edge", "insecureEdgeTerminationPolicy": "Redirect"},
+                },
+            }
+            created_route = clients["custom"].create_namespaced_custom_object(
+                group="route.openshift.io", version="v1",
+                namespace=body.namespace, plural="routes",
+                body=route_body,
+            )
+            route_host = created_route.get("spec", {}).get("host", "")
+            if route_host:
+                route_url = f"https://{route_host}"
+        except client.exceptions.ApiException as e:
+            if e.status != 409:
+                pass
+
+        result = {"ok": True, "message": f"Deployed app {body.app_name} on {name}"}
+        if route_url:
+            result["route_url"] = route_url
+        return result
     except client.exceptions.ApiException as e:
         raise HTTPException(e.status, json.loads(e.body).get("message", str(e)))
     except Exception as e:
@@ -855,6 +912,13 @@ def api_delete_app(cluster_name: str, ns: str, app_name: str):
         apps_api.delete_namespaced_deployment(name=app_name, namespace=ns)
         try:
             core.delete_namespaced_service(name=app_name, namespace=ns)
+        except Exception:
+            pass
+        try:
+            clients["custom"].delete_namespaced_custom_object(
+                group="route.openshift.io", version="v1",
+                namespace=ns, plural="routes", name=app_name,
+            )
         except Exception:
             pass
         return {"ok": True, "message": f"Deleted app {app_name}"}
@@ -1118,6 +1182,138 @@ def api_delete_link(link_id: str):
     links = [lnk for lnk in links if lnk["id"] != link_id]
     save_links(links)
     return {"ok": True}
+
+
+@app.get("/api/metrics/summary")
+def api_metrics_summary():
+    clusters_list = load_clusters()
+
+    def gather_metrics(cluster):
+        result = {
+            "gpu_count": 0, "gpu_util_sum": 0, "gpu_util_count": 0,
+            "model_count": 0, "tokens_per_sec": None,
+        }
+        try:
+            clients = get_k8s_clients(cluster["kubeconfig"])
+            core = clients["core"]
+            custom = clients["custom"]
+
+            nodes = core.list_node(_request_timeout=K8S_TIMEOUT)
+            for node in nodes.items:
+                alloc = node.status.allocatable or {}
+                result["gpu_count"] += int(alloc.get("nvidia.com/gpu", "0"))
+
+            try:
+                query_instant, _ = get_thanos_querier(cluster)
+                gpu_results = query_instant("DCGM_FI_DEV_GPU_UTIL")
+                for r in gpu_results:
+                    val = float(r["value"][1])
+                    result["gpu_util_sum"] += val
+                    result["gpu_util_count"] += 1
+
+                tps_results = query_instant("sum(rate(vllm:generation_tokens_total[5m]))")
+                if tps_results and tps_results[0]["value"][1] != "NaN":
+                    result["tokens_per_sec"] = float(tps_results[0]["value"][1])
+            except Exception:
+                pass
+
+            try:
+                items = custom.list_cluster_custom_object(
+                    group=KSERVE_GROUP, version=KSERVE_VERSION,
+                    plural="llminferenceservices",
+                    _request_timeout=K8S_TIMEOUT,
+                ).get("items", [])
+                result["model_count"] = len(items)
+            except Exception:
+                pass
+
+        except Exception:
+            pass
+        return result
+
+    with ThreadPoolExecutor(max_workers=max(len(clusters_list), 1)) as pool:
+        results = list(pool.map(gather_metrics, clusters_list))
+
+    total_gpus = sum(r["gpu_count"] for r in results)
+    total_util_sum = sum(r["gpu_util_sum"] for r in results)
+    total_util_count = sum(r["gpu_util_count"] for r in results)
+    total_models = sum(r["model_count"] for r in results)
+    tps_values = [r["tokens_per_sec"] for r in results if r["tokens_per_sec"] is not None]
+
+    return {
+        "total_gpus": total_gpus,
+        "gpu_utilization_pct": round(total_util_sum / total_util_count, 1) if total_util_count else None,
+        "active_models": total_models,
+        "active_clusters": len([r for r in results if r["gpu_count"] > 0 or r["model_count"] > 0]),
+        "tokens_per_sec": round(sum(tps_values), 1) if tps_values else None,
+    }
+
+
+@app.get("/api/metrics/timeseries")
+def api_metrics_timeseries(window: str = Query("1h", pattern="^(1h|6h|24h)$")):
+    duration_map = {"1h": 3600, "6h": 21600, "24h": 86400}
+    step_map = {"1h": "60", "6h": "300", "24h": "900"}
+
+    duration = duration_map[window]
+    step = step_map[window]
+    end_time = time.time()
+    start_time = end_time - duration
+
+    clusters_list = load_clusters()
+
+    queries = {
+        "gpu_utilization": "avg(DCGM_FI_DEV_GPU_UTIL)",
+        "tokens_per_sec": "sum(rate(vllm:generation_tokens_total[5m]))",
+        "queue_depth": "sum(vllm:num_requests_waiting)",
+    }
+
+    def fetch_cluster_series(cluster):
+        cluster_results = {}
+        try:
+            _, query_range = get_thanos_querier(cluster)
+            for metric_name, promql in queries.items():
+                try:
+                    results = query_range(promql, start_time, end_time, step)
+                    points = []
+                    for r in results:
+                        for ts, val in r.get("values", []):
+                            if val != "NaN":
+                                points.append((float(ts), float(val)))
+                    cluster_results[metric_name] = points
+                except Exception:
+                    cluster_results[metric_name] = []
+        except Exception:
+            for k in queries:
+                cluster_results[k] = []
+        return cluster_results
+
+    with ThreadPoolExecutor(max_workers=max(len(clusters_list), 1)) as pool:
+        all_results = list(pool.map(fetch_cluster_series, clusters_list))
+
+    series = {k: {} for k in queries}
+    for cluster_data in all_results:
+        for metric_name, points in cluster_data.items():
+            for ts, val in points:
+                ts_key = int(ts)
+                if ts_key not in series[metric_name]:
+                    series[metric_name][ts_key] = []
+                series[metric_name][ts_key].append(val)
+
+    output = {}
+    for metric_name in queries:
+        sorted_ts = sorted(series[metric_name].keys())
+        timestamps = []
+        values = []
+        for ts in sorted_ts:
+            timestamps.append(ts)
+            vals = series[metric_name][ts]
+            if metric_name == "gpu_utilization":
+                values.append(round(sum(vals) / len(vals), 1))
+            else:
+                values.append(round(sum(vals), 1))
+        output[metric_name] = {"timestamps": timestamps, "values": values}
+
+    return output
 
 
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True))
