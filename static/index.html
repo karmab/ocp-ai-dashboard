@@ -527,6 +527,13 @@ const healthColors = {
   unknown: { fill: '#666', border: '#888' },
 };
 
+function tooltipContent(c) {
+  let html = c.display_name;
+  if (c.gpu_count) html += `<br><span style="color:#00cc66; font-size:11px;">${c.gpu_count} GPU &bull; ${c.gpu_avg}% util</span>`;
+  if (c.tags && c.tags.length) html += `<br><span style="color:#999; font-size:11px;">${c.tags.join(' · ')}</span>`;
+  return html;
+}
+
 function placeMarker(c) {
   const hc = healthColors[c.health] || healthColors.unknown;
   const marker = L.marker([c.lat, c.lon], {
@@ -539,8 +546,7 @@ function placeMarker(c) {
   }).addTo(map).on('click', () => showClusterInfo(c));
   marker.clusterName = c.name;
   markers[c.name] = marker;
-  const tagsLine = (c.tags && c.tags.length) ? `<br><span style="color:#999; font-size:11px;">${c.tags.join(' · ')}</span>` : '';
-  marker.bindTooltip(c.display_name + tagsLine, {
+  marker.bindTooltip(tooltipContent(c), {
     permanent: false, direction: 'top', offset: [0, -10],
     className: 'cluster-tooltip',
   });
@@ -556,6 +562,8 @@ function updateMarkerColor(c) {
     iconSize: [24, 24],
     iconAnchor: [12, 12],
   }));
+  marker.unbindTooltip();
+  marker.bindTooltip(tooltipContent(c), { permanent: false, direction: 'top', offset: [0, -10], className: 'cluster-tooltip' });
 }
 
 async function loadClusters() {
@@ -1026,9 +1034,8 @@ async function addCluster() {
 function rebindTooltip(clusterName, cluster) {
   const marker = markers[clusterName];
   if (!marker) return;
-  const tagsLine = (cluster.tags && cluster.tags.length) ? `<br><span style="color:#999; font-size:11px;">${cluster.tags.join(' · ')}</span>` : '';
   marker.unbindTooltip();
-  marker.bindTooltip(cluster.display_name + tagsLine, { permanent: false, direction: 'top', offset: [0, -10], className: 'cluster-tooltip' });
+  marker.bindTooltip(tooltipContent(cluster), { permanent: false, direction: 'top', offset: [0, -10], className: 'cluster-tooltip' });
 }
 
 async function addTag(clusterName, tag) {

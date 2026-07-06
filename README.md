@@ -26,14 +26,13 @@ The container expects a `/data` volume with the following structure:
 /data/
 ├── clusters.json          # cluster definitions
 ├── links.json             # model links (created automatically if missing)
-├── keys/
-│   ├── vai.key            # MaaS API key for cluster "vai"
-│   ├── mai.key
-│   └── cluster1.key
-└── kubeconfigs/
-    ├── vai.kubeconfig
-    ├── mai.kubeconfig
-    └── cluster1.kubeconfig
+├── vai.kubeconfig
+├── mai.kubeconfig
+├── cluster1.kubeconfig
+└── keys/
+    ├── vai.key            # MaaS API key for cluster "vai"
+    ├── mai.key
+    └── cluster1.key
 ```
 
 ### clusters.json
@@ -43,21 +42,21 @@ The container expects a `/data` volume with the following structure:
   {
     "name": "vai",
     "display_name": "vai (Azure)",
-    "kubeconfig": "/data/kubeconfigs/vai.kubeconfig",
+    "kubeconfig": "/data/vai.kubeconfig",
     "lat": 37.37,
     "lon": -122.04
   },
   {
     "name": "mai",
     "display_name": "mai (AWS)",
-    "kubeconfig": "/data/kubeconfigs/mai.kubeconfig",
+    "kubeconfig": "/data/mai.kubeconfig",
     "lat": 45.52,
     "lon": -122.68
   }
 ]
 ```
 
-Kubeconfig paths must be container-side paths (i.e. under `/data/kubeconfigs/`).
+Kubeconfig paths must be container-side paths (i.e. under `/data/`).
 
 ### API key files
 

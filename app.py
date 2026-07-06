@@ -543,17 +543,21 @@ def api_deploy_model(name: str, body: ModelDeploy):
             vllm_args = ["--dtype", "bfloat16", "--max-model-len", "4096"]
         else:
             container_image = "vllm/vllm-openai:v0.8.4"
+            vllm_extra = f"--dtype=half --max-model-len=4096 --gpu-memory-utilization=0.9 --enforce-eager --tensor-parallel-size {body.gpu_count}"
             container_env = [
                 {"name": "VLLM_USE_V1", "value": "0"},
                 {"name": "HF_HOME", "value": "/tmp/hf_home"},
+                {"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_extra},
             ]
+            mem_limit = f"{12 * body.gpu_count}Gi"
+            mem_request = f"{8 * body.gpu_count}Gi"
             container_resources = {
                 "limits": {
-                    "cpu": "2", "memory": "12Gi",
+                    "cpu": "2", "memory": mem_limit,
                     "nvidia.com/gpu": str(body.gpu_count),
                 },
                 "requests": {
-                    "cpu": "1", "memory": "8Gi",
+                    "cpu": "1", "memory": mem_request,
                     "nvidia.com/gpu": str(body.gpu_count),
                 },
             }
