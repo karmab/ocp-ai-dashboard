@@ -1,0 +1,20 @@
+[
+  {
+    "id": "c2-qwen3-06b-spread",
+    "model_id": "Qwen/Qwen3-0.6B",
+    "model_name": "qwen3-0-6b",
+    "model_namespace": "my-first-model",
+    "hub": "cluster2",
+    "spokes": ["mai", "vai"],
+    "created_at": "2026-07-09T17:00:00Z"
+  },
+  {
+    "id": "aigrid-qwen3-17b-spread",
+    "model_id": "Qwen/Qwen3-1.7B",
+    "model_name": "qwen3-1-7b",
+    "model_namespace": "maas-project",
+    "hub": "aigrid-hub",
+    "spokes": ["aigrid-ifc1", "aigrid-ifc2"],
+    "created_at": "2026-07-01T00:00:00Z"
+  }
+]

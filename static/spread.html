@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hub-and-Spoke Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0e1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; padding: 24px; }
+
+  .header { text-align: center; margin-bottom: 28px; }
+  .header h1 { font-size: 26px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+  .header .live { color: #44cc66; font-size: 13px; }
+  .header .live::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #44cc66; margin-right: 6px; animation: pulse 2s infinite; }
+  .header .hub-url { color: #5588cc; font-size: 12px; margin-top: 4px; }
+  .header .hub-url a { color: #5588cc; text-decoration: none; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .spokes-row { display: flex; gap: 20px; margin-bottom: 24px; }
+  .spoke-card { flex: 1; background: #111827; border: 1px solid #1e293b; border-radius: 8px; padding: 18px; }
+  .spoke-card h2 { font-size: 16px; font-weight: 500; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
+  .spoke-card h2 .region { font-size: 11px; color: #0a0; background: #0a02; border: 1px solid #0a03; padding: 2px 8px; border-radius: 10px; }
+
+  .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .metric { }
+  .metric .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+  .metric .value { font-size: 28px; font-weight: 600; color: #fff; margin-top: 2px; }
+  .metric .value.green { color: #44cc66; }
+
+  .section { background: #111827; border: 1px solid #1e293b; border-radius: 8px; padding: 18px; margin-bottom: 24px; }
+  .section h3 { font-size: 14px; color: #cc44ff; font-weight: 500; margin-bottom: 14px; }
+
+  .routing-decision { text-align: center; padding: 20px 0; }
+  .routing-label { color: #888; font-size: 13px; margin-bottom: 6px; }
+  .routing-target { font-size: 28px; font-weight: 600; color: #fff; transition: color 0.3s; }
+  .routing-target.flash { color: #44cc66; }
+  .routing-reason { color: #888; font-size: 12px; margin-top: 6px; }
+
+  .scores-row { display: flex; justify-content: center; gap: 40px; margin-top: 16px; }
+  .score-item { text-align: center; }
+  .score-item .score-label { font-size: 12px; color: #999; margin-bottom: 4px; }
+  .score-bar-bg { width: 120px; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; }
+  .score-bar { height: 100%; border-radius: 3px; transition: width 0.5s; }
+  .score-value { font-size: 12px; color: #bbb; margin-top: 3px; }
+
+  .event-log { max-height: 200px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 11px; line-height: 1.8; }
+  .event-log .entry { color: #888; }
+  .event-log .entry .ts { color: #555; }
+  .event-log .entry .route-change { color: #cc44ff; }
+  .event-log .entry .metric-update { color: #44cc66; }
+
+  .unreachable { opacity: 0.5; }
+  .unreachable::after { content: ' (unreachable)'; color: #ff4444; font-size: 12px; }
+
+  .theme-toggle { position: fixed; top: 16px; right: 20px; background: #1e293b; border: 1px solid #334155; color: #ccc; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; z-index: 10; }
+  .theme-toggle:hover { background: #334155; }
+
+  body.light { background: #f3f4f6; color: #1f2937; }
+  body.light .header h1 { color: #111; }
+  body.light .header .hub-url, body.light .header .hub-url a { color: #2563eb; }
+  body.light .spoke-card, body.light .section { background: #fff; border-color: #d1d5db; }
+  body.light .spoke-card h2 .region { color: #16a34a; background: #dcfce7; border-color: #bbf7d0; }
+  body.light .metric .label { color: #6b7280; }
+  body.light .metric .value { color: #111; }
+  body.light .routing-target { color: #111; }
+  body.light .routing-label, body.light .routing-reason { color: #6b7280; }
+  body.light .score-item .score-label { color: #6b7280; }
+  body.light .score-bar-bg { background: #e5e7eb; }
+  body.light .score-value { color: #374151; }
+  body.light .event-log .entry { color: #6b7280; }
+  body.light .event-log .entry .ts { color: #9ca3af; }
+  body.light .theme-toggle { background: #e5e7eb; border-color: #d1d5db; color: #374151; }
+  body.light .theme-toggle:hover { background: #d1d5db; }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" onclick="toggleTheme()">Light</button>
+
+<div class="header">
+  <h1>Multi-Cluster Hub-and-Spoke Dashboard</h1>
+  <div class="live" id="live-status">Live - Last update: --:--:-- | Hub sees <span id="spoke-count">0</span> Spoke clusters</div>
+  <div class="hub-url">Hub Gateway: <a id="hub-url-link" href="#" target="_blank">--</a></div>
+</div>
+
+<div class="spokes-row" id="spokes-row"></div>
+
+<div class="section">
+  <h3>Routing Decision</h3>
+  <div class="routing-decision">
+    <div class="routing-label">Next inference request would route to:</div>
+    <div class="routing-target" id="route-target">--</div>
+    <div class="routing-reason" id="route-reason"></div>
+    <div class="scores-row" id="scores-row"></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Event Log</h3>
+  <div class="event-log" id="event-log">
+    <div class="entry" style="color:#555;">Waiting for data...</div>
+  </div>
+</div>
+
+<script>
+function toggleTheme() {
+  const body = document.body;
+  const btn = document.querySelector('.theme-toggle');
+  body.classList.toggle('light');
+  const isLight = body.classList.contains('light');
+  btn.textContent = isLight ? 'Dark' : 'Light';
+  localStorage.setItem('theme', isLight ? 'light' : 'dark');
+}
+if (localStorage.getItem('theme') === 'light') {
+  document.body.classList.add('light');
+  document.querySelector('.theme-toggle').textContent = 'Dark';
+}
+
+const params = new URLSearchParams(location.search);
+const spreadId = params.get('id') || '';
+let lastRouteTarget = '';
+let lastMetrics = {};
+const events = [];
+
+function ts() {
+  return new Date().toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function addEvent(msg, cls) {
+  events.unshift({ time: ts(), msg, cls });
+  if (events.length > 50) events.pop();
+  const el = document.getElementById('event-log');
+  el.innerHTML = events.map(e =>
+    `<div class="entry"><span class="ts">${e.time}</span> <span class="${e.cls || ''}">${e.msg}</span></div>`
+  ).join('');
+}
+
+function renderSpokes(spokes) {
+  const row = document.getElementById('spokes-row');
+  row.innerHTML = spokes.map((s, i) => `
+    <div class="spoke-card ${s.reachable ? '' : 'unreachable'}">
+      <h2>
+        ${s.display_name}
+        ${s.region ? `<span class="region">${s.region}</span>` : ''}
+      </h2>
+      <div class="metrics-grid">
+        <div class="metric">
+          <div class="label">Ready Pods</div>
+          <div class="value green">${s.ready_pods}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Avg Latency</div>
+          <div class="value">${s.avg_latency_ms} ms</div>
+        </div>
+        <div class="metric">
+          <div class="label">Req/min (5m)</div>
+          <div class="value">${s.req_rate}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Tokens/s (5m)</div>
+          <div class="value">${s.tokens_per_sec}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Total Requests</div>
+          <div class="value">${s.total_requests.toLocaleString()}</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderScores(spokes, scores, routeTo) {
+  const maxScore = Math.max(...scores, 1);
+  document.getElementById('route-target').textContent =
+    `${spokes.find(s => s.name === routeTo)?.display_name || routeTo}` +
+    `${spokes.find(s => s.name === routeTo)?.region ? ' (' + spokes.find(s => s.name === routeTo).region + ')' : ''}`;
+
+  const best = scores.indexOf(Math.max(...scores));
+  const worst = scores.indexOf(Math.min(...scores));
+  if (best !== worst) {
+    document.getElementById('route-reason').textContent =
+      `Score ${scores[best]} > ${scores[worst]}: Lower load on ${spokes[best]?.display_name}`;
+  } else {
+    document.getElementById('route-reason').textContent = 'Scores are equal - random selection';
+  }
+
+  document.getElementById('scores-row').innerHTML = spokes.map((s, i) => {
+    const pct = Math.round((scores[i] / maxScore) * 100);
+    const color = i === best ? '#44cc66' : '#5588cc';
+    return `
+      <div class="score-item">
+        <div class="score-label">${s.display_name} Score</div>
+        <div class="score-bar-bg"><div class="score-bar" style="width:${pct}%; background:${color};"></div></div>
+        <div class="score-value">${scores[i]}</div>
+      </div>`;
+  }).join('');
+}
+
+async function refresh() {
+  if (!spreadId) {
+    document.getElementById('live-status').textContent = 'No spread ID provided. Use ?id=<spread_id>';
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/spreads/${spreadId}/metrics`);
+    if (!resp.ok) throw new Error(resp.statusText);
+    const data = await resp.json();
+
+    document.getElementById('live-status').innerHTML =
+      `<span style="color:#44cc66;">&#9679;</span> Live - Last update: ${ts()} | Hub sees ${data.spokes.length} Spoke clusters`;
+
+    if (data.hub_url) {
+      const link = document.getElementById('hub-url-link');
+      link.href = data.hub_url;
+      link.textContent = data.hub_url;
+    }
+
+    renderSpokes(data.spokes);
+    renderScores(data.spokes, data.scores, data.route_to);
+
+    if (lastRouteTarget && lastRouteTarget !== data.route_to) {
+      addEvent(`Route changed: ${lastRouteTarget} → ${data.route_to}`, 'route-change');
+      const el = document.getElementById('route-target');
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 1500);
+    }
+    lastRouteTarget = data.route_to;
+
+    for (const s of data.spokes) {
+      const prev = lastMetrics[s.name] || {};
+      const rateChanged = prev.req_rate !== s.req_rate;
+      const tpsChanged = prev.tokens_per_sec !== s.tokens_per_sec;
+      if (rateChanged || tpsChanged) {
+        addEvent(`${s.display_name}: ${s.req_rate} req/min, ${s.tokens_per_sec} tok/s, queue ${s.avg_queue}, KV ${s.kv_cache_pct}%`, 'metric-update');
+      }
+      lastMetrics[s.name] = { ...s };
+    }
+    addEvent(`Polled — route → ${data.route_to} (scores: ${data.scores.join(', ')})`, '');
+
+  } catch (e) {
+    addEvent(`Error fetching metrics: ${e.message}`, '');
+  }
+}
+
+async function loop() {
+  await refresh();
+  setTimeout(loop, 3000);
+}
+loop();
+</script>
+</body>
+</html>

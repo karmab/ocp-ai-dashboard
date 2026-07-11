@@ -168,6 +168,39 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
 #tag-add-input::placeholder { color: #666; }
 .cluster-marker { background: none !important; border: none !important; }
 
+
+.theme-toggle { position: fixed; top: 10px; right: 340px; background: #1e293b; border: 1px solid #444; color: #ccc; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit; z-index: 1001; }
+.theme-toggle:hover { background: #333; }
+
+body.light { background: #f3f4f6; color: #1f2937; }
+body.light #header { background: #fff; border-bottom-color: #ee0000; }
+body.light #header h1 { color: #111; }
+body.light #sidebar { background: #fff; border-left-color: #d1d5db; }
+body.light .sidebar-section { border-bottom-color: #d1d5db; }
+body.light .model-card { background: #f9fafb; border-left-color: #ee0000; }
+body.light .model-card:hover { background: #f3f4f6; }
+body.light .model-card.selected { background: #fef2f2; }
+body.light .model-card .model-sub { color: #6b7280; }
+body.light .form-group label { color: #6b7280; }
+body.light .form-group input, body.light .form-group select { background: #f9fafb; border-color: #d1d5db; color: #111; }
+body.light #info-panel h3 { color: #111; }
+body.light .model-list-item { background: #f9fafb; }
+body.light .model-list-item .ml-meta { color: #6b7280; }
+body.light #deploy-dialog, body.light #wizard-dialog, body.light #spread-dialog { background: #fff; }
+body.light #toast { background: #fff; color: #111; border-color: #ee0000; }
+body.light .cluster-tag { background: #f3f4f6; border-color: #d1d5db; color: #374151; }
+body.light #tag-add-input { background: #f9fafb; border-color: #d1d5db; color: #111; }
+body.light #metrics-strip { background: #fff; border-top-color: #d1d5db; }
+body.light .metric-label { color: #6b7280; }
+body.light #ms-chart-toggle { border-color: #d1d5db; color: #6b7280; }
+body.light #ms-chart-toggle:hover { background: #f3f4f6; color: #111; }
+body.light #chart-panel { background: #fff; border-top-color: #d1d5db; }
+body.light #chart-window-btns button { border-color: #d1d5db; color: #6b7280; }
+body.light .theme-toggle { background: #e5e7eb; border-color: #d1d5db; color: #374151; }
+body.light .theme-toggle:hover { background: #d1d5db; }
+body.light .leaflet-popup-content-wrapper { background: #fff !important; color: #111 !important; }
+body.light .leaflet-popup-tip { background: #fff !important; }
+
 #metrics-strip {
   position: fixed; bottom: 0; left: 0; right: 320px;
   height: 56px; background: #0c0c0c; border-top: 1px solid #333;
@@ -204,6 +237,8 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
 </style>
 </head>
 <body>
+
+<button class="theme-toggle" onclick="toggleTheme()">Light</button>
 
 <div id="header">
   <h1><span>RHOAI</span> Grid Orchestrator</h1>
@@ -286,10 +321,10 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
     </div>
 
     <div class="sidebar-section">
-      <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('links-section-wrap')">Model Links <span id="links-section-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
-      <div id="links-section-wrap">
-        <div id="links-list" style="margin-bottom: 8px;"></div>
-        <button class="btn btn-outline btn-sm" onclick="openLinkWizard()" style="width:100%; border-color:#ff8800; color:#ff8800;">+ Link Models</button>
+      <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('spreads-section-wrap')">Model Spreads <span id="spreads-section-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
+      <div id="spreads-section-wrap">
+        <div id="spreads-list" style="margin-bottom: 8px;"></div>
+        <button class="btn btn-outline btn-sm" onclick="openSpreadWizard()" style="width:100%; border-color:#cc44ff; color:#cc44ff;">+ Register Spread</button>
       </div>
     </div>
 
@@ -394,32 +429,33 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
   </div>
 </div>
 
-<div id="link-overlay" onclick="closeLinkWizard()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1999;"></div>
-<div id="link-dialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #ff8800; border-radius:8px; padding:24px; z-index:2000; min-width:380px;">
-  <h3 style="font-size:16px; margin-bottom:16px; color:#ff8800;">Link Model Across Clusters</h3>
+<div id="spread-overlay" onclick="closeSpreadWizard()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1999;"></div>
+<div id="spread-dialog" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #cc44ff; border-radius:8px; padding:24px; z-index:2000; min-width:380px;">
+  <h3 style="font-size:16px; margin-bottom:16px; color:#cc44ff;">Register Model Spread</h3>
   <div class="form-group">
     <label>Model Name</label>
-    <input type="text" id="link-model-name" placeholder="qwen3-0-6b">
+    <input type="text" id="spread-model-name" placeholder="qwen3-1-7b">
   </div>
   <div class="form-group">
     <label>Model Namespace</label>
-    <input type="text" id="link-model-ns" placeholder="my-first-model">
+    <input type="text" id="spread-model-ns" placeholder="my-namespace">
   </div>
   <div class="form-group">
     <label>Model ID (HuggingFace)</label>
-    <input type="text" id="link-model-id" placeholder="Qwen/Qwen3-0.6B">
+    <input type="text" id="spread-model-id" placeholder="Qwen/Qwen3-1.7B">
   </div>
   <div class="form-group">
-    <label>Cluster A</label>
-    <select id="link-cluster-a"></select>
+    <label>Hub Cluster</label>
+    <select id="spread-hub"></select>
+    <div id="spread-hub-hint" style="font-size:11px; color:#999; margin-top:4px;"></div>
   </div>
   <div class="form-group">
-    <label>Cluster B</label>
-    <select id="link-cluster-b"></select>
+    <label>Spoke Clusters</label>
+    <div id="spread-spokes-list" style="display:flex; flex-direction:column; gap:6px; margin-top:4px;"></div>
   </div>
   <div style="display:flex; gap:8px; margin-top:16px;">
-    <button class="btn" style="background:#ff8800;" onclick="submitLink()">Create Link</button>
-    <button class="btn btn-outline" onclick="closeLinkWizard()">Cancel</button>
+    <button class="btn" style="background:#cc44ff;" onclick="submitSpread()">Register Spread</button>
+    <button class="btn btn-outline" onclick="closeSpreadWizard()">Cancel</button>
   </div>
 </div>
 
@@ -469,13 +505,33 @@ body { font-family: 'Red Hat Display', sans-serif; background: #1a1a1a; color: #
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
-const map = L.map('map', { zoomControl: false, minZoom: 3, maxZoom: 12 }).setView([39.5, -98.5], 4);
+const map = L.map('map', { zoomControl: false, minZoom: 3, maxZoom: 12, renderer: L.svg() }).setView([39.5, -98.5], 4);
 L.control.zoom({ position: 'topright' }).addTo(map);
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; OpenStreetMap &copy; CARTO',
-  maxZoom: 19,
-}).addTo(map);
+const darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+});
+const lightTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+});
+
+function toggleTheme() {
+  const body = document.body;
+  const btn = document.querySelector('.theme-toggle');
+  body.classList.toggle('light');
+  const isLight = body.classList.contains('light');
+  btn.textContent = isLight ? 'Dark' : 'Light';
+  localStorage.setItem('grid-theme', isLight ? 'light' : 'dark');
+  if (isLight) { map.removeLayer(darkTiles); lightTiles.addTo(map); }
+  else { map.removeLayer(lightTiles); darkTiles.addTo(map); }
+}
+if (localStorage.getItem('grid-theme') === 'light') {
+  document.body.classList.add('light');
+  document.querySelector('.theme-toggle').textContent = 'Dark';
+  lightTiles.addTo(map);
+} else {
+  darkTiles.addTo(map);
+}
 
 let clusters = [];
 let markers = {};
@@ -483,8 +539,8 @@ let selectedApp = null;
 let addingCluster = false;
 let draggedModel = null;
 let draggedSidebarItem = null;
-let linkLines = [];
-let linksData = [];
+let spreadLines = [];
+let spreadsData = [];
 
 function toast(msg, duration = 3000) {
   const el = document.getElementById('toast');
@@ -1182,101 +1238,133 @@ function submitWizard() {
   closeWizard();
 }
 
-async function loadLinks() {
+async function loadSpreads() {
   try {
-    linksData = await fetchJSON('/api/links');
+    spreadsData = await fetchJSON('/api/spreads');
   } catch (e) {
-    linksData = [];
+    spreadsData = [];
   }
-  linkLines.forEach(l => map.removeLayer(l));
-  linkLines = [];
+  spreadLines.forEach(l => map.removeLayer(l));
+  spreadLines = [];
 
-  for (const link of linksData) {
-    const ca = clusters.find(c => c.name === link.cluster_a);
-    const cb = clusters.find(c => c.name === link.cluster_b);
-    if (!ca || !cb) continue;
-    const line = L.polyline(
-      [[ca.lat, ca.lon], [cb.lat, cb.lon]],
-      { color: '#ff8800', weight: 2, dashArray: '8, 6', opacity: 0.8 }
-    ).addTo(map);
-    line.bindTooltip(`${link.model_id} (linked)`, { sticky: true });
-    line.linkId = link.id;
-    linkLines.push(line);
+  for (const spread of spreadsData) {
+    const hubNode = clusters.find(c => c.name === spread.hub);
+    if (!hubNode) continue;
+    const spokeNodes = spread.spokes.map(s => clusters.find(c => c.name === s)).filter(Boolean);
+    for (const spoke of spokeNodes) {
+      const line = L.polyline(
+        [[hubNode.lat, hubNode.lon], [spoke.lat, spoke.lon]],
+        { color: '#cc44ff', weight: 2, dashArray: '4, 8', opacity: 0.8 }
+      ).addTo(map);
+      line.bindTooltip(`${spread.model_id} (${hubNode.name} → ${spoke.name})`, { sticky: true });
+      line.spreadId = spread.id;
+      line.spokeName = spoke.name;
+      spreadLines.push(line);
+    }
   }
-
-  renderLinksList();
+  renderSpreadsList();
 }
 
-function renderLinksList() {
-  const el = document.getElementById('links-list');
-  if (!linksData.length) {
-    el.innerHTML = '<div style="color:#666; font-size:12px;">No active links</div>';
+function renderSpreadsList() {
+  const el = document.getElementById('spreads-list');
+  if (!spreadsData.length) {
+    el.innerHTML = '<div style="color:#666; font-size:12px;">No active spreads</div>';
     return;
   }
-  el.innerHTML = linksData.map(link => `
-    <div style="background:#2a2a2a; border-left:3px solid #ff8800; border-radius:4px; padding:8px 10px; margin-bottom:6px; font-size:12px;">
-      <div style="font-weight:500; font-size:13px;">${link.model_id}</div>
-      <div style="color:#999;">${link.cluster_a} ↔ ${link.cluster_b}</div>
-      <button class="btn btn-danger btn-sm" style="margin-top:4px;" onclick="deleteLink('${link.id}')">Remove</button>
-    </div>
+  el.innerHTML = spreadsData.map(s => {
+    const statusColor = s.verified ? '#44cc66' : '#ff4444';
+    const statusText = s.verified ? 'verified' : 'unverified';
+    return `
+    <div style="background:#2a2a2a; border-left:3px solid ${s.verified ? '#cc44ff' : '#666'}; border-radius:4px; padding:8px 10px; margin-bottom:6px; font-size:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:500; font-size:13px;">${s.model_id}</span>
+        <span style="color:${statusColor}; font-size:11px;">${statusText}</span>
+      </div>
+      <div style="color:#999;">Hub: ${s.hub} → ${s.spokes.join(', ')}</div>
+      <button class="btn btn-danger btn-sm" style="margin-top:4px;" onclick="deleteSpread('${s.id}')">Remove</button>
+    </div>`;
+  }).join('');
+}
+
+function openSpreadWizard() {
+  const hubClusters = clusters.filter(c => c.reachable && (c.tags || []).includes('hub'));
+  const hubSel = document.getElementById('spread-hub');
+  const hint = document.getElementById('spread-hub-hint');
+
+  if (!hubClusters.length) {
+    hubSel.innerHTML = '';
+    hint.textContent = 'No clusters tagged as "hub". Tag a cluster first.';
+    hint.style.color = '#ff4444';
+  } else {
+    hubSel.innerHTML = hubClusters.map(c => `<option value="${c.name}">${c.display_name}</option>`).join('');
+    hint.textContent = '';
+    hint.style.color = '#999';
+  }
+  updateSpokesList();
+  hubSel.onchange = updateSpokesList;
+
+  document.getElementById('spread-overlay').style.display = 'block';
+  document.getElementById('spread-dialog').style.display = 'block';
+}
+
+function updateSpokesList() {
+  const container = document.getElementById('spread-spokes-list');
+  const spokes = clusters.filter(c => c.reachable);
+  container.innerHTML = spokes.map(c => `
+    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+      <input type="checkbox" value="${c.name}" class="spread-spoke-cb"> ${c.display_name}
+    </label>
   `).join('');
 }
 
-function openLinkWizard() {
-  const selA = document.getElementById('link-cluster-a');
-  const selB = document.getElementById('link-cluster-b');
-  const reachable = clusters.filter(c => c.reachable);
-  selA.innerHTML = reachable.map(c => `<option value="${c.name}">${c.display_name}</option>`).join('');
-  selB.innerHTML = reachable.map(c => `<option value="${c.name}">${c.display_name}</option>`).join('');
-  if (reachable.length > 1) selB.selectedIndex = 1;
-  document.getElementById('link-overlay').style.display = 'block';
-  document.getElementById('link-dialog').style.display = 'block';
+function closeSpreadWizard() {
+  document.getElementById('spread-overlay').style.display = 'none';
+  document.getElementById('spread-dialog').style.display = 'none';
 }
 
-function closeLinkWizard() {
-  document.getElementById('link-overlay').style.display = 'none';
-  document.getElementById('link-dialog').style.display = 'none';
-}
-
-async function submitLink() {
-  const model_name = document.getElementById('link-model-name').value.trim();
-  const model_namespace = document.getElementById('link-model-ns').value.trim();
-  const model_id = document.getElementById('link-model-id').value.trim();
-  const cluster_a = document.getElementById('link-cluster-a').value;
-  const cluster_b = document.getElementById('link-cluster-b').value;
+async function submitSpread() {
+  const model_name = document.getElementById('spread-model-name').value.trim();
+  const model_namespace = document.getElementById('spread-model-ns').value.trim();
+  const model_id = document.getElementById('spread-model-id').value.trim();
+  const hub = document.getElementById('spread-hub').value;
+  const spokes = [...document.querySelectorAll('.spread-spoke-cb:checked')].map(cb => cb.value);
 
   if (!model_name || !model_namespace || !model_id) {
     toast('Fill in all fields');
     return;
   }
-  if (cluster_a === cluster_b) {
-    toast('Pick two different clusters');
+  if (!hub) {
+    toast('No hub cluster available');
+    return;
+  }
+  if (!spokes.length) {
+    toast('Select at least one spoke cluster');
     return;
   }
 
-  closeLinkWizard();
-  toast('Creating link...', 5000);
+  closeSpreadWizard();
+  toast('Registering spread...', 5000);
 
   try {
-    await fetchJSON('/api/links', {
+    await fetchJSON('/api/spreads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model_name, model_namespace, model_id, cluster_a, cluster_b }),
+      body: JSON.stringify({ model_name, model_namespace, model_id, hub, spokes }),
     });
-    toast('Link created');
-    await loadLinks();
+    toast('Spread registered');
+    await loadSpreads();
   } catch (e) {
-    toast(`Link failed: ${e.message}`, 5000);
+    toast(`Spread failed: ${e.message}`, 5000);
   }
 }
 
-async function deleteLink(linkId) {
-  if (!confirm('Remove this model link?')) return;
-  toast('Removing link...');
+async function deleteSpread(spreadId) {
+  if (!confirm('Remove this model spread?')) return;
+  toast('Removing spread...');
   try {
-    await fetchJSON(`/api/links/${linkId}`, { method: 'DELETE' });
-    toast('Link removed');
-    await loadLinks();
+    await fetchJSON(`/api/spreads/${spreadId}`, { method: 'DELETE' });
+    toast('Spread removed');
+    await loadSpreads();
   } catch (e) {
     toast(`Remove failed: ${e.message}`, 5000);
   }
@@ -1377,8 +1465,52 @@ function renderChart(data) {
   });
 }
 
-loadClusters().then(() => { setupDropTargets(); loadLinks(); loadMetricsSummary(); });
+let lineFlowOffsets = {};
+let lineFlowRates = {};
+let flowAnimFrame = null;
+
+function animateFlowLines() {
+  const now = performance.now();
+  for (const line of spreadLines) {
+    const key = line.spreadId + ':' + line.spokeName;
+    const rate = lineFlowRates[key] || 0;
+    if (rate <= 0) continue;
+    const path = line._path;
+    if (!path) continue;
+    const speed = Math.max(20, Math.min(150, rate * 3));
+    if (!lineFlowOffsets[key]) lineFlowOffsets[key] = 0;
+    lineFlowOffsets[key] = (lineFlowOffsets[key] - speed * 0.016) % 24;
+    path.setAttribute('stroke-dashoffset', lineFlowOffsets[key]);
+  }
+  flowAnimFrame = requestAnimationFrame(animateFlowLines);
+}
+flowAnimFrame = requestAnimationFrame(animateFlowLines);
+
+async function pollTraffic() {
+  try {
+    const data = await fetchJSON('/api/spreads/traffic');
+    for (const line of spreadLines) {
+      const spokeData = data.spreads?.[line.spreadId]?.[line.spokeName];
+      const rate = spokeData?.req_rate || 0;
+      const key = line.spreadId + ':' + line.spokeName;
+      lineFlowRates[key] = rate;
+      if (rate > 0) {
+        line.setStyle({ weight: Math.min(2 + rate / 10, 4), opacity: 0.9, dashArray: '6, 10' });
+      } else {
+        line.setStyle({ weight: 2, opacity: 0.5, dashArray: '4, 8' });
+        if (line._path) line._path.setAttribute('stroke-dashoffset', '0');
+      }
+      line.unbindTooltip();
+      const spread = spreadsData.find(s => s.id === line.spreadId);
+      const hubName = spread?.hub || '?';
+      line.bindTooltip(`${spread?.model_id || '?'} (${hubName} → ${line.spokeName}) ${rate > 0 ? rate + ' req/min' : 'idle'}`, { sticky: true });
+    }
+  } catch (e) {}
+}
+
+loadClusters().then(() => { setupDropTargets(); loadSpreads(); loadMetricsSummary(); });
 setInterval(loadMetricsSummary, 30000);
+setInterval(pollTraffic, 5000);
 </script>
 </body>
 </html>

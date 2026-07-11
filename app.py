@@ -5,8 +5,8 @@ import ssl
 import time
 import traceback
 import urllib.request
-import yaml
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -20,10 +20,8 @@ app = FastAPI()
 
 DATA_DIR = Path(os.environ.get("GRID_DATA_DIR", str(Path(__file__).parent)))
 CLUSTERS_FILE = DATA_DIR / "clusters.json"
-LINKS_FILE = DATA_DIR / "links.json"
+SPREADS_FILE = DATA_DIR / "spreads.json"
 KEYS_DIR = Path(os.environ.get("GRID_KEYS_DIR", str(Path(__file__).parent.parent)))
-LITELLM_NS = "litellm-lb"
-LITELLM_TARGET_CLUSTER = "mai"
 MAAS_GROUP = "maas.opendatahub.io"
 MAAS_VERSION = "v1alpha1"
 KSERVE_GROUP = "serving.kserve.io"
@@ -97,6 +95,68 @@ REGION_COORDS = {
 
 
 GPU_YELLOW_THRESHOLD = 90
+
+# --- Caches for spread metrics performance ---
+_thanos_cache = {}   # cluster_name -> (query_instant, query_range, expires_at)
+_region_cache = {}   # cluster_name -> region_string
+_hub_url_cache = {}  # hub_cluster_name -> (url, expires_at)
+
+THANOS_CACHE_TTL = 300  # token valid 600s, refresh at 300
+HUB_URL_CACHE_TTL = 120
+
+
+def _get_cached_thanos(cluster):
+    name = cluster.get("name", cluster["kubeconfig"])
+    now = time.time()
+    cached = _thanos_cache.get(name)
+    if cached and cached[2] > now:
+        return cached[0], cached[1]
+    qi, qr = get_thanos_querier(cluster)
+    _thanos_cache[name] = (qi, qr, now + THANOS_CACHE_TTL)
+    return qi, qr
+
+
+def _get_cached_region(cluster):
+    name = cluster.get("name", cluster["kubeconfig"])
+    if name in _region_cache:
+        return _region_cache[name]
+    try:
+        clients = get_k8s_clients(cluster["kubeconfig"])
+        nodes = clients["core"].list_node(_request_timeout=K8S_TIMEOUT)
+        for node in nodes.items:
+            region = (node.metadata.labels or {}).get("topology.kubernetes.io/region", "")
+            if region:
+                _region_cache[name] = region
+                return region
+    except Exception:
+        pass
+    _region_cache[name] = ""
+    return ""
+
+
+def _get_cached_hub_url(hub_cluster):
+    name = hub_cluster.get("name", hub_cluster["kubeconfig"])
+    now = time.time()
+    cached = _hub_url_cache.get(name)
+    if cached and cached[1] > now:
+        return cached[0]
+    hub_url = ""
+    try:
+        clients = get_k8s_clients(hub_cluster["kubeconfig"])
+        routes = clients["custom"].list_namespaced_custom_object(
+            group="route.openshift.io", version="v1",
+            namespace="aig-routing", plural="routes",
+            _request_timeout=K8S_TIMEOUT,
+        ).get("items", [])
+        for r in routes:
+            host = r.get("spec", {}).get("host", "")
+            if host:
+                hub_url = f"https://{host}"
+                break
+    except Exception:
+        pass
+    _hub_url_cache[name] = (hub_url, now + HUB_URL_CACHE_TTL)
+    return hub_url
 
 
 def get_thanos_querier(cluster):
@@ -948,262 +1008,267 @@ def api_delete_app(cluster_name: str, ns: str, app_name: str):
         raise HTTPException(e.status, json.loads(e.body).get("message", str(e)))
 
 
-def load_links():
-    if not LINKS_FILE.exists():
+def load_spreads():
+    if not SPREADS_FILE.exists():
         return []
-    with open(LINKS_FILE) as f:
+    with open(SPREADS_FILE) as f:
         return json.load(f)
 
 
-def save_links(links):
-    with open(LINKS_FILE, "w") as f:
-        json.dump(links, f, indent=2)
+def save_spreads(spreads):
+    with open(SPREADS_FILE, "w") as f:
+        json.dump(spreads, f, indent=2)
 
 
-def get_cluster_domain(cluster):
-    clients = get_k8s_clients(cluster["kubeconfig"])
-    ingress = clients["custom"].get_cluster_custom_object(
-        group="config.openshift.io", version="v1",
-        plural="ingresses", name="cluster",
-        _request_timeout=K8S_TIMEOUT,
-    )
-    return ingress["spec"]["domain"]
+def verify_spread(spread, clusters_data):
+    hub_cluster = next((c for c in clusters_data if c["name"] == spread["hub"]), None)
+    if not hub_cluster:
+        return False
+    try:
+        clients = get_k8s_clients(hub_cluster["kubeconfig"])
+        custom = clients["custom"]
+        ns = "aig-routing"
+        route_ok = False
+        try:
+            routes = custom.list_namespaced_custom_object(
+                group="route.openshift.io", version="v1",
+                namespace=ns, plural="routes",
+                _request_timeout=K8S_TIMEOUT,
+            ).get("items", [])
+            for r in routes:
+                svc = r.get("spec", {}).get("to", {}).get("name", "")
+                admitted = any(
+                    c.get("type") == "Admitted" and c.get("status") == "True"
+                    for ing in r.get("status", {}).get("ingress", [])
+                    for c in ing.get("conditions", [])
+                )
+                if svc and admitted:
+                    route_ok = True
+                    break
+        except Exception:
+            pass
+        if not route_ok:
+            return False
+        providers = custom.list_namespaced_custom_object(
+            group="inference.opendatahub.io", version="v1alpha1",
+            namespace=ns, plural="externalproviders",
+            _request_timeout=K8S_TIMEOUT,
+        ).get("items", [])
+        ready_providers = set()
+        for ep in providers:
+            conditions = ep.get("status", {}).get("conditions", [])
+            if any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
+                ready_providers.add(ep["metadata"]["name"])
+        for spoke in spread["spokes"]:
+            if spoke not in ready_providers:
+                return False
+        return True
+    except Exception:
+        return False
 
 
-def read_api_key(cluster_name):
-    key_file = KEYS_DIR / f"{cluster_name}.key"
-    if not key_file.exists():
-        raise HTTPException(400, f"API key file not found: {key_file}")
-    return key_file.read_text().strip()
+@app.get("/api/spreads")
+def api_list_spreads():
+    spreads = load_spreads()
+    clusters_data = load_clusters()
+    for s in spreads:
+        s["verified"] = verify_spread(s, clusters_data)
+    return spreads
 
 
-@app.get("/api/links")
-def api_list_links():
-    return load_links()
-
-
-class LinkCreate(BaseModel):
+class SpreadCreate(BaseModel):
     model_name: str
     model_namespace: str
     model_id: str
-    cluster_a: str
-    cluster_b: str
+    hub: str
+    spokes: list[str]
 
 
-@app.post("/api/links")
-def api_create_link(body: LinkCreate):
+@app.post("/api/spreads")
+def api_create_spread(body: SpreadCreate):
     clusters_data = load_clusters()
-    cluster_a = next((c for c in clusters_data if c["name"] == body.cluster_a), None)
-    cluster_b = next((c for c in clusters_data if c["name"] == body.cluster_b), None)
-    if not cluster_a or not cluster_b:
-        raise HTTPException(404, "One or both clusters not found")
+    cluster_names = {c["name"]: c for c in clusters_data}
 
-    target = next((c for c in clusters_data if c["name"] == LITELLM_TARGET_CLUSTER), None)
-    if not target:
-        raise HTTPException(404, f"Target cluster '{LITELLM_TARGET_CLUSTER}' not found")
+    hub_cluster = cluster_names.get(body.hub)
+    if not hub_cluster:
+        raise HTTPException(404, f"Hub cluster '{body.hub}' not found")
+    if "hub" not in hub_cluster.get("tags", []):
+        raise HTTPException(400, f"Cluster '{body.hub}' is not tagged as hub")
 
-    link_id = hashlib.md5(
-        f"{body.model_name}-{body.cluster_a}-{body.cluster_b}".encode()
+    for spoke in body.spokes:
+        if spoke not in cluster_names:
+            raise HTTPException(404, f"Spoke cluster '{spoke}' not found")
+    if len(set(body.spokes)) != len(body.spokes):
+        raise HTTPException(400, "Duplicate spokes")
+    if not body.spokes:
+        raise HTTPException(400, "At least one spoke required")
+
+    sorted_spokes = sorted(body.spokes)
+    spread_id = hashlib.md5(
+        f"{body.model_name}-{body.hub}-{'-'.join(sorted_spokes)}".encode()
     ).hexdigest()[:8]
 
-    existing = load_links()
-    if any(lnk["id"] == link_id for lnk in existing):
-        raise HTTPException(409, "This link already exists")
+    existing = load_spreads()
+    if any(s["id"] == spread_id for s in existing):
+        raise HTTPException(409, "This spread already exists")
 
-    try:
-        domain_a = get_cluster_domain(cluster_a)
-        domain_b = get_cluster_domain(cluster_b)
-    except Exception as e:
-        raise HTTPException(500, f"Cannot resolve cluster domain: {e}")
-
-    key_a = read_api_key(body.cluster_a)
-    key_b = read_api_key(body.cluster_b)
-
-    litellm_config = {
-        "model_list": [
-            {
-                "model_name": body.model_id,
-                "litellm_params": {
-                    "model": f"openai/{body.model_id}",
-                    "api_base": f"https://maas.{domain_a}/{body.model_namespace}/{body.model_name}/v1",
-                    "api_key": "os.environ/APIKEY_A",
-                },
-            },
-            {
-                "model_name": body.model_id,
-                "litellm_params": {
-                    "model": f"openai/{body.model_id}",
-                    "api_base": f"https://maas.{domain_b}/{body.model_namespace}/{body.model_name}/v1",
-                    "api_key": "os.environ/APIKEY_B",
-                },
-            },
-        ],
-        "router_settings": {
-            "routing_strategy": "simple-shuffle",
-        },
-    }
-
-    resource_name = f"litellm-{link_id}"
-
-    try:
-        clients = get_k8s_clients(target["kubeconfig"])
-        core = clients["core"]
-        apps_api = client.AppsV1Api(clients["api_client"])
-
-        try:
-            core.create_namespace(
-                client.V1Namespace(metadata=client.V1ObjectMeta(name=LITELLM_NS))
-            )
-        except client.exceptions.ApiException as e:
-            if e.status != 409:
-                raise
-
-        cm = client.V1ConfigMap(
-            metadata=client.V1ObjectMeta(name=resource_name, namespace=LITELLM_NS),
-            data={"config.yaml": yaml.dump(litellm_config, default_flow_style=False)},
-        )
-        try:
-            core.create_namespaced_config_map(namespace=LITELLM_NS, body=cm)
-        except client.exceptions.ApiException as e:
-            if e.status != 409:
-                raise
-
-        secret = client.V1Secret(
-            metadata=client.V1ObjectMeta(name=f"{resource_name}-keys", namespace=LITELLM_NS),
-            string_data={"APIKEY_A": key_a, "APIKEY_B": key_b},
-        )
-        try:
-            core.create_namespaced_secret(namespace=LITELLM_NS, body=secret)
-        except client.exceptions.ApiException as e:
-            if e.status != 409:
-                raise
-
-        deployment = client.V1Deployment(
-            metadata=client.V1ObjectMeta(
-                name=resource_name, namespace=LITELLM_NS,
-                labels={GRID_LABEL: "true", "grid.rhoai/link": link_id},
-            ),
-            spec=client.V1DeploymentSpec(
-                replicas=1,
-                selector=client.V1LabelSelector(match_labels={"app": resource_name}),
-                template=client.V1PodTemplateSpec(
-                    metadata=client.V1ObjectMeta(labels={"app": resource_name}),
-                    spec=client.V1PodSpec(
-                        containers=[
-                            client.V1Container(
-                                name="litellm",
-                                image="ghcr.io/berriai/litellm:main",
-                                args=["--config", "/app/config.yaml", "--port", "4000"],
-                                ports=[client.V1ContainerPort(container_port=4000)],
-                                env_from=[
-                                    client.V1EnvFromSource(
-                                        secret_ref=client.V1SecretEnvSource(
-                                            name=f"{resource_name}-keys"
-                                        )
-                                    )
-                                ],
-                                volume_mounts=[
-                                    client.V1VolumeMount(
-                                        name="config",
-                                        mount_path="/app/config.yaml",
-                                        sub_path="config.yaml",
-                                    )
-                                ],
-                            )
-                        ],
-                        volumes=[
-                            client.V1Volume(
-                                name="config",
-                                config_map=client.V1ConfigMapVolumeSource(
-                                    name=resource_name,
-                                ),
-                            )
-                        ],
-                    ),
-                ),
-            ),
-        )
-        apps_api.create_namespaced_deployment(namespace=LITELLM_NS, body=deployment)
-
-        svc = client.V1Service(
-            metadata=client.V1ObjectMeta(
-                name=resource_name, namespace=LITELLM_NS,
-                labels={GRID_LABEL: "true", "grid.rhoai/link": link_id},
-            ),
-            spec=client.V1ServiceSpec(
-                selector={"app": resource_name},
-                ports=[client.V1ServicePort(port=4000, target_port=4000)],
-            ),
-        )
-        try:
-            core.create_namespaced_service(namespace=LITELLM_NS, body=svc)
-        except client.exceptions.ApiException as e:
-            if e.status != 409:
-                raise
-
-    except client.exceptions.ApiException as e:
-        raise HTTPException(e.status, json.loads(e.body).get("message", str(e)))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-    link_entry = {
-        "id": link_id,
+    spread_entry = {
+        "id": spread_id,
+        "model_id": body.model_id,
         "model_name": body.model_name,
         "model_namespace": body.model_namespace,
-        "model_id": body.model_id,
-        "cluster_a": body.cluster_a,
-        "cluster_b": body.cluster_b,
-        "resource_name": resource_name,
-        "target_cluster": LITELLM_TARGET_CLUSTER,
+        "hub": body.hub,
+        "spokes": sorted_spokes,
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
     }
-    existing.append(link_entry)
-    save_links(existing)
-    return {"ok": True, "link": link_entry}
+    existing.append(spread_entry)
+    save_spreads(existing)
+    return {"ok": True, "spread": spread_entry}
 
 
-@app.delete("/api/links/{link_id}")
-def api_delete_link(link_id: str):
-    links = load_links()
-    link = next((lnk for lnk in links if lnk["id"] == link_id), None)
-    if not link:
-        raise HTTPException(404, "Link not found")
+@app.delete("/api/spreads/{spread_id}")
+def api_delete_spread(spread_id: str):
+    spreads = load_spreads()
+    if not any(s["id"] == spread_id for s in spreads):
+        raise HTTPException(404, "Spread not found")
+    spreads = [s for s in spreads if s["id"] != spread_id]
+    save_spreads(spreads)
+    return {"ok": True}
+
+
+@app.get("/api/spreads/{spread_id}/metrics")
+def api_spread_metrics(spread_id: str):
+    spreads = load_spreads()
+    spread = next((s for s in spreads if s["id"] == spread_id), None)
+    if not spread:
+        raise HTTPException(404, "Spread not found")
 
     clusters_data = load_clusters()
-    target = next(
-        (c for c in clusters_data if c["name"] == link.get("target_cluster", LITELLM_TARGET_CLUSTER)),
-        None,
-    )
-    if target:
-        try:
-            clients = get_k8s_clients(target["kubeconfig"])
-            core = clients["core"]
-            apps_api = client.AppsV1Api(clients["api_client"])
-            resource_name = link["resource_name"]
+    cluster_map = {c["name"]: c for c in clusters_data}
 
-            try:
-                apps_api.delete_namespaced_deployment(name=resource_name, namespace=LITELLM_NS)
-            except Exception:
-                pass
-            try:
-                core.delete_namespaced_service(name=resource_name, namespace=LITELLM_NS)
-            except Exception:
-                pass
-            try:
-                core.delete_namespaced_config_map(name=resource_name, namespace=LITELLM_NS)
-            except Exception:
-                pass
-            try:
-                core.delete_namespaced_secret(name=f"{resource_name}-keys", namespace=LITELLM_NS)
-            except Exception:
-                pass
+    hub_cluster = cluster_map.get(spread["hub"])
+    hub_url = _get_cached_hub_url(hub_cluster) if hub_cluster else ""
+
+    def spoke_metrics(spoke_name):
+        cluster = cluster_map.get(spoke_name)
+        result = {
+            "name": spoke_name,
+            "display_name": cluster.get("display_name", spoke_name) if cluster else spoke_name,
+            "ready_pods": 0,
+            "avg_latency_ms": 0.0,
+            "req_rate": 0.0,
+            "tokens_per_sec": 0.0,
+            "total_requests": 0,
+            "region": "",
+            "reachable": False,
+        }
+        if not cluster:
+            return result
+        try:
+            query_instant, _ = _get_cached_thanos(cluster)
+            ns = spread["model_namespace"]
+            model = spread["model_name"]
+
+            queries = {
+                "pods": f'count(up{{namespace="{ns}",job=~".*{model}.*"}}==1)',
+                "latency": (
+                    f'rate(vllm:e2e_request_latency_seconds_sum{{namespace="{ns}"}}[5m])'
+                    f' / rate(vllm:e2e_request_latency_seconds_count{{namespace="{ns}"}}[5m])'
+                ),
+                "req_rate": f'sum(rate(vllm:request_success_total{{namespace="{ns}"}}[5m]))',
+                "tps": f'sum(rate(vllm:generation_tokens_total{{namespace="{ns}"}}[5m]))',
+                "total": f'sum(vllm:request_success_total{{namespace="{ns}"}})',
+            }
+
+            def run_query(item):
+                key, promql = item
+                try:
+                    return key, query_instant(promql)
+                except Exception:
+                    return key, []
+
+            with ThreadPoolExecutor(max_workers=5) as qpool:
+                raw = dict(qpool.map(run_query, queries.items()))
+
+            if raw["pods"]:
+                result["ready_pods"] = int(float(raw["pods"][0]["value"][1]))
+            for key, field, scale in [
+                ("latency", "avg_latency_ms", 1000),
+                ("req_rate", "req_rate", 60),
+                ("tps", "tokens_per_sec", 1),
+                ("total", "total_requests", 1),
+            ]:
+                v = raw.get(key)
+                if v and v[0]["value"][1] != "NaN":
+                    val = float(v[0]["value"][1]) * scale
+                    result[field] = int(val) if key == "total" else round(val, 1)
+
+            result["reachable"] = True
+            result["region"] = _get_cached_region(cluster)
         except Exception:
             pass
+        return result
 
-    links = [lnk for lnk in links if lnk["id"] != link_id]
-    save_links(links)
-    return {"ok": True}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        spoke_results = list(pool.map(spoke_metrics, spread["spokes"]))
+
+    scores = []
+    for s in spoke_results:
+        latency_penalty = min(s["avg_latency_ms"] / 1000, 3)
+        score = round(max(4 - latency_penalty, 1), 2)
+        scores.append(score)
+
+    max_score = max(scores) if scores else 0
+    best_indices = [i for i, sc in enumerate(scores) if sc == max_score]
+    best_idx = best_indices[int(time.time()) % len(best_indices)] if best_indices else 0
+    return {
+        "spread": spread,
+        "hub_url": hub_url,
+        "spokes": spoke_results,
+        "scores": scores,
+        "route_to": spoke_results[best_idx]["name"] if spoke_results else "",
+    }
+
+
+@app.get("/api/spreads/traffic")
+def api_spreads_traffic():
+    spreads = load_spreads()
+    clusters_data = load_clusters()
+    cluster_map = {c["name"]: c for c in clusters_data}
+
+    all_spoke_queries = []
+    for spread in spreads:
+        for spoke_name in spread["spokes"]:
+            cluster = cluster_map.get(spoke_name)
+            if cluster:
+                all_spoke_queries.append((spread["id"], spoke_name, cluster, spread["model_namespace"]))
+
+    def query_spoke_rate(item):
+        spread_id, spoke_name, cluster, ns = item
+        try:
+            qi, _ = _get_cached_thanos(cluster)
+            result = qi(f'sum(rate(vllm:request_success_total{{namespace="{ns}"}}[5m]))')
+            if result and result[0]["value"][1] != "NaN":
+                return spread_id, spoke_name, round(float(result[0]["value"][1]) * 60, 1)
+        except Exception:
+            pass
+        return spread_id, spoke_name, 0.0
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(query_spoke_rate, all_spoke_queries))
+
+    traffic = {}
+    for spread_id, spoke_name, req_rate in results:
+        traffic.setdefault(spread_id, {})[spoke_name] = {"req_rate": req_rate}
+
+    for spread in spreads:
+        if spread["id"] not in traffic:
+            traffic[spread["id"]] = {}
+        for spoke_name in spread["spokes"]:
+            if spoke_name not in traffic[spread["id"]]:
+                traffic[spread["id"]][spoke_name] = {"req_rate": 0.0}
+
+    return {"spreads": traffic}
 
 
 @app.get("/api/metrics/summary")
