@@ -238,7 +238,7 @@ body.light .leaflet-popup-tip { background: #fff !important; }
 </head>
 <body>
 
-<button class="theme-toggle" onclick="toggleTheme()">Light</button>
+<button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">&#9790;</button>
 
 <div id="header">
   <h1><span>RHOAI</span> Grid Orchestrator</h1>
@@ -520,14 +520,14 @@ function toggleTheme() {
   const btn = document.querySelector('.theme-toggle');
   body.classList.toggle('light');
   const isLight = body.classList.contains('light');
-  btn.textContent = isLight ? 'Dark' : 'Light';
+  btn.innerHTML = isLight ? '&#9728;' : '&#9790;';
   localStorage.setItem('grid-theme', isLight ? 'light' : 'dark');
   if (isLight) { map.removeLayer(darkTiles); lightTiles.addTo(map); }
   else { map.removeLayer(lightTiles); darkTiles.addTo(map); }
 }
 if (localStorage.getItem('grid-theme') === 'light') {
   document.body.classList.add('light');
-  document.querySelector('.theme-toggle').textContent = 'Dark';
+  document.querySelector('.theme-toggle').innerHTML = '&#9728;';
   lightTiles.addTo(map);
 } else {
   darkTiles.addTo(map);
@@ -1252,13 +1252,15 @@ async function loadSpreads() {
     if (!hubNode) continue;
     const spokeNodes = spread.spokes.map(s => clusters.find(c => c.name === s)).filter(Boolean);
     for (const spoke of spokeNodes) {
-      const line = L.polyline(
-        [[hubNode.lat, hubNode.lon], [spoke.lat, spoke.lon]],
-        { color: '#cc44ff', weight: 2, dashArray: '4, 8', opacity: 0.8 }
-      ).addTo(map);
-      line.bindTooltip(`${spread.model_id} (${hubNode.name} → ${spoke.name})`, { sticky: true });
+      const coords = [[hubNode.lat, hubNode.lon], [spoke.lat, spoke.lon]];
+      const hitArea = L.polyline(coords, { color: 'transparent', weight: 16, opacity: 0, interactive: true }).addTo(map);
+      const line = L.polyline(coords, { color: '#00d4ff', weight: 2, dashArray: '4, 8', opacity: 0.8, interactive: false }).addTo(map);
+      hitArea.bindTooltip(`${spread.model_id} (${hubNode.name} → ${spoke.name})`, { sticky: true });
+      hitArea.on('click', () => window.open(`/spread.html?id=${spread.id}`, '_blank'));
+      hitArea.setStyle({ cursor: 'pointer' });
       line.spreadId = spread.id;
       line.spokeName = spoke.name;
+      line._hitArea = hitArea;
       spreadLines.push(line);
     }
   }
@@ -1500,10 +1502,13 @@ async function pollTraffic() {
         line.setStyle({ weight: 2, opacity: 0.5, dashArray: '4, 8' });
         if (line._path) line._path.setAttribute('stroke-dashoffset', '0');
       }
-      line.unbindTooltip();
-      const spread = spreadsData.find(s => s.id === line.spreadId);
-      const hubName = spread?.hub || '?';
-      line.bindTooltip(`${spread?.model_id || '?'} (${hubName} → ${line.spokeName}) ${rate > 0 ? rate + ' req/min' : 'idle'}`, { sticky: true });
+      const hitArea = line._hitArea;
+      if (hitArea) {
+        hitArea.unbindTooltip();
+        const spread = spreadsData.find(s => s.id === line.spreadId);
+        const hubName = spread?.hub || '?';
+        hitArea.bindTooltip(`${spread?.model_id || '?'} (${hubName} → ${line.spokeName}) ${rate > 0 ? rate + ' req/min' : 'idle'}`, { sticky: true });
+      }
     }
   } catch (e) {}
 }

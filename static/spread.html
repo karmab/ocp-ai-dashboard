@@ -29,7 +29,7 @@
   .metric .value.green { color: #44cc66; }
 
   .section { background: #111827; border: 1px solid #1e293b; border-radius: 8px; padding: 18px; margin-bottom: 24px; }
-  .section h3 { font-size: 14px; color: #cc44ff; font-weight: 500; margin-bottom: 14px; }
+  .section h3 { font-size: 14px; color: #00d4ff; font-weight: 500; margin-bottom: 14px; }
 
   .routing-decision { text-align: center; padding: 20px 0; }
   .routing-label { color: #888; font-size: 13px; margin-bottom: 6px; }
@@ -47,7 +47,7 @@
   .event-log { max-height: 200px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 11px; line-height: 1.8; }
   .event-log .entry { color: #888; }
   .event-log .entry .ts { color: #555; }
-  .event-log .entry .route-change { color: #cc44ff; }
+  .event-log .entry .route-change { color: #00d4ff; }
   .event-log .entry .metric-update { color: #44cc66; }
 
   .unreachable { opacity: 0.5; }
@@ -76,7 +76,7 @@
 </head>
 <body>
 
-<button class="theme-toggle" onclick="toggleTheme()">Light</button>
+<button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">&#9790;</button>
 
 <div class="header">
   <h1>Multi-Cluster Hub-and-Spoke Dashboard</h1>
@@ -109,12 +109,12 @@ function toggleTheme() {
   const btn = document.querySelector('.theme-toggle');
   body.classList.toggle('light');
   const isLight = body.classList.contains('light');
-  btn.textContent = isLight ? 'Dark' : 'Light';
+  btn.innerHTML = isLight ? '&#9728;' : '&#9790;';
   localStorage.setItem('theme', isLight ? 'light' : 'dark');
 }
 if (localStorage.getItem('theme') === 'light') {
   document.body.classList.add('light');
-  document.querySelector('.theme-toggle').textContent = 'Dark';
+  document.querySelector('.theme-toggle').innerHTML = '&#9728;';
 }
 
 const params = new URLSearchParams(location.search);
