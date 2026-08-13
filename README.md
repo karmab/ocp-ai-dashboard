@@ -1,6 +1,6 @@
 # AI Grid Demo
 
-Map-based dashboard for managing RHOAI MaaS clusters, models, and cross-cluster load balancing via LiteLLM.
+Map-based dashboard for managing RHOAI MaaS clusters, models, and cross-cluster load balancing.
 
 ## Image
 
@@ -62,7 +62,7 @@ Kubeconfig paths must be container-side paths (i.e. under `/data/`).
 
 The app reads MaaS API keys from `{GRID_KEYS_DIR}/{cluster_name}.key`. With the default `GRID_KEYS_DIR=/data/keys`, a cluster named `vai` needs its key at `/data/keys/vai.key`.
 
-These keys are used for cross-cluster model linking (LiteLLM proxy deployment).
+These keys are used for cross-cluster model linking.
 
 ## Environment variables
 
