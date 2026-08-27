@@ -1403,6 +1403,10 @@ def api_metrics_timeseries(window: str = Query("1h", pattern="^(1h|6h|24h)$")):
     return output
 
 
+if os.environ.get("GRID_DEMO_MODE"):
+    from demo.mock_api import install_demo_routes
+    install_demo_routes(app, DATA_DIR, Path(__file__).parent / "demo" / "seed")
+
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True))
 
 if __name__ == "__main__":

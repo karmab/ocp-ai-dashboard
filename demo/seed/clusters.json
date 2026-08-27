@@ -1,0 +1,26 @@
+[
+  {
+    "name": "vai",
+    "display_name": "vai (Azure)",
+    "kubeconfig": "/data/vai.kubeconfig",
+    "lat": 37.37,
+    "lon": -122.04,
+    "tags": ["hub", "production"]
+  },
+  {
+    "name": "satch",
+    "display_name": "satch (AWS)",
+    "kubeconfig": "/data/satch.kubeconfig",
+    "lat": 45.52,
+    "lon": -122.68,
+    "tags": ["gpu-pool"]
+  },
+  {
+    "name": "bumblefoot",
+    "display_name": "bumblefoot (libvirt)",
+    "kubeconfig": "/data/bumblefoot.kubeconfig",
+    "lat": 40.71,
+    "lon": -74.01,
+    "tags": []
+  }
+]

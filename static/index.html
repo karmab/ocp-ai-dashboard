@@ -1516,6 +1516,8 @@ async function pollTraffic() {
 loadClusters().then(() => { setupDropTargets(); loadSpreads(); loadMetricsSummary(); });
 setInterval(loadMetricsSummary, 30000);
 setInterval(pollTraffic, 5000);
+
+fetch('/api/demo/status').then(r => r.ok && import('/demo-guide.js')).catch(() => {});
 </script>
 </body>
 </html>

@@ -1,0 +1,15 @@
+{
+  "vai": [
+    {
+      "name": "reversewords",
+      "namespace": "demo-apps",
+      "image": "quay.io/mavazque/reversewords:latest",
+      "replicas": 1,
+      "ready_replicas": 1,
+      "ready": true,
+      "route_url": "https://reversewords-demo-apps.apps.vai.example.com"
+    }
+  ],
+  "satch": [],
+  "bumblefoot": []
+}

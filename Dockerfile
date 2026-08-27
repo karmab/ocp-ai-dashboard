@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 COPY static/ static/
+COPY demo/ demo/
 
 ENV GRID_DATA_DIR=/data
 ENV GRID_KEYS_DIR=/data/keys
