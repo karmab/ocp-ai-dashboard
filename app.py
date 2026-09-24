@@ -143,15 +143,14 @@ def _get_cached_hub_url(hub_cluster):
     hub_url = ""
     try:
         clients = get_k8s_clients(hub_cluster["kubeconfig"])
-        routes = clients["custom"].list_namespaced_custom_object(
-            group="route.openshift.io", version="v1",
-            namespace="aig-routing", plural="routes",
+        svc = clients["core"].read_namespaced_service(
+            name="consumer-gateway", namespace="grid-system",
             _request_timeout=K8S_TIMEOUT,
-        ).get("items", [])
-        for r in routes:
-            host = r.get("spec", {}).get("host", "")
-            if host:
-                hub_url = f"https://{host}"
+        )
+        for ingress in (svc.status.load_balancer.ingress or []):
+            ip = ingress.ip or ingress.hostname
+            if ip:
+                hub_url = f"http://{ip}:8080"
                 break
     except Exception:
         pass
@@ -1009,131 +1008,92 @@ def api_delete_app(cluster_name: str, ns: str, app_name: str):
 
 
 def load_spreads():
-    if not SPREADS_FILE.exists():
-        return []
-    with open(SPREADS_FILE) as f:
-        return json.load(f)
-
-
-def save_spreads(spreads):
-    with open(SPREADS_FILE, "w") as f:
-        json.dump(spreads, f, indent=2)
-
-
-def verify_spread(spread, clusters_data):
-    hub_cluster = next((c for c in clusters_data if c["name"] == spread["hub"]), None)
+    clusters_data = load_clusters()
+    hub_cluster = next((c for c in clusters_data if "hub" in c.get("tags", [])), None)
     if not hub_cluster:
-        return False
+        return []
+    cluster_names = {c["name"] for c in clusters_data}
     try:
         clients = get_k8s_clients(hub_cluster["kubeconfig"])
         custom = clients["custom"]
-        ns = "aig-routing"
-        route_ok = False
-        try:
-            routes = custom.list_namespaced_custom_object(
-                group="route.openshift.io", version="v1",
-                namespace=ns, plural="routes",
-                _request_timeout=K8S_TIMEOUT,
-            ).get("items", [])
-            for r in routes:
-                svc = r.get("spec", {}).get("to", {}).get("name", "")
-                admitted = any(
-                    c.get("type") == "Admitted" and c.get("status") == "True"
-                    for ing in r.get("status", {}).get("ingress", [])
-                    for c in ing.get("conditions", [])
-                )
-                if svc and admitted:
-                    route_ok = True
-                    break
-        except Exception:
-            pass
-        if not route_ok:
-            return False
-        providers = custom.list_namespaced_custom_object(
-            group="inference.opendatahub.io", version="v1alpha1",
-            namespace=ns, plural="externalproviders",
+        ns = "grid-system"
+        networks = custom.list_cluster_custom_object(
+            group="grid.praxis-proxy.io", version="v1alpha1",
+            plural="gridnetworks",
             _request_timeout=K8S_TIMEOUT,
         ).get("items", [])
-        ready_providers = set()
-        for ep in providers:
-            conditions = ep.get("status", {}).get("conditions", [])
-            if any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
-                ready_providers.add(ep["metadata"]["name"])
-        for spoke in spread["spokes"]:
-            if spoke not in ready_providers:
-                return False
-        return True
+        active_network = next(
+            (n for n in networks if n.get("status", {}).get("phase") == "Active"), None
+        )
+        if not active_network:
+            return []
+        sites = custom.list_cluster_custom_object(
+            group="grid.praxis-proxy.io", version="v1alpha1",
+            plural="gridsites",
+            _request_timeout=K8S_TIMEOUT,
+        ).get("items", [])
+        active_sites = {
+            s["metadata"]["name"]: s.get("status", {}).get("phase")
+            for s in sites
+        }
+        overlay_name = active_network.get("status", {}).get("overlayStatus", [{}])[0].get("configMapName", "")
+        if not overlay_name:
+            return []
+        cm = clients["core"].read_namespaced_config_map(
+            name=overlay_name, namespace=ns,
+            _request_timeout=K8S_TIMEOUT,
+        )
+        routing_data = json.loads(cm.data.get("routing-config.json", "{}"))
+        candidates = routing_data.get("candidates", [])
+        models = {}
+        for c in candidates:
+            model_name = c.get("name", "")
+            site_name = c.get("site", "")
+            cluster_id = c.get("cluster", "")
+            if not model_name or not site_name:
+                continue
+            spoke_name = None
+            for cname in cluster_names:
+                if cname != hub_cluster["name"] and cname in site_name:
+                    spoke_name = cname
+                    break
+            if not spoke_name:
+                continue
+            if model_name not in models:
+                models[model_name] = {"spokes": [], "cluster_id": cluster_id}
+            models[model_name]["spokes"].append(spoke_name)
+        spreads = []
+        for model_name, info in models.items():
+            sorted_spokes = sorted(info["spokes"])
+            spread_id = hashlib.md5(
+                f"{model_name}-{hub_cluster['name']}-{'-'.join(sorted_spokes)}".encode()
+            ).hexdigest()[:8]
+            ns_guess = info["cluster_id"].rsplit("-", 1)[0] if "-" in info["cluster_id"] else info["cluster_id"]
+            all_active = all(
+                any(spoke in sname and active_sites.get(sname) == "Active" for sname in active_sites)
+                for spoke in sorted_spokes
+            )
+            spreads.append({
+                "id": spread_id,
+                "model_id": info["cluster_id"],
+                "model_name": model_name,
+                "model_namespace": ns_guess,
+                "hub": hub_cluster["name"],
+                "spokes": sorted_spokes,
+                "verified": all_active,
+            })
+        return spreads
     except Exception:
-        return False
+        return []
+
+
+def save_spreads(spreads):
+    pass
 
 
 @app.get("/api/spreads")
 def api_list_spreads():
-    spreads = load_spreads()
-    clusters_data = load_clusters()
-    for s in spreads:
-        s["verified"] = verify_spread(s, clusters_data)
-    return spreads
-
-
-class SpreadCreate(BaseModel):
-    model_name: str
-    model_namespace: str
-    model_id: str
-    hub: str
-    spokes: list[str]
-
-
-@app.post("/api/spreads")
-def api_create_spread(body: SpreadCreate):
-    clusters_data = load_clusters()
-    cluster_names = {c["name"]: c for c in clusters_data}
-
-    hub_cluster = cluster_names.get(body.hub)
-    if not hub_cluster:
-        raise HTTPException(404, f"Hub cluster '{body.hub}' not found")
-    if "hub" not in hub_cluster.get("tags", []):
-        raise HTTPException(400, f"Cluster '{body.hub}' is not tagged as hub")
-
-    for spoke in body.spokes:
-        if spoke not in cluster_names:
-            raise HTTPException(404, f"Spoke cluster '{spoke}' not found")
-    if len(set(body.spokes)) != len(body.spokes):
-        raise HTTPException(400, "Duplicate spokes")
-    if not body.spokes:
-        raise HTTPException(400, "At least one spoke required")
-
-    sorted_spokes = sorted(body.spokes)
-    spread_id = hashlib.md5(
-        f"{body.model_name}-{body.hub}-{'-'.join(sorted_spokes)}".encode()
-    ).hexdigest()[:8]
-
-    existing = load_spreads()
-    if any(s["id"] == spread_id for s in existing):
-        raise HTTPException(409, "This spread already exists")
-
-    spread_entry = {
-        "id": spread_id,
-        "model_id": body.model_id,
-        "model_name": body.model_name,
-        "model_namespace": body.model_namespace,
-        "hub": body.hub,
-        "spokes": sorted_spokes,
-        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-    }
-    existing.append(spread_entry)
-    save_spreads(existing)
-    return {"ok": True, "spread": spread_entry}
-
-
-@app.delete("/api/spreads/{spread_id}")
-def api_delete_spread(spread_id: str):
-    spreads = load_spreads()
-    if not any(s["id"] == spread_id for s in spreads):
-        raise HTTPException(404, "Spread not found")
-    spreads = [s for s in spreads if s["id"] != spread_id]
-    save_spreads(spreads)
-    return {"ok": True}
+    return load_spreads()
 
 
 @app.get("/api/spreads/{spread_id}/metrics")
@@ -1170,7 +1130,7 @@ def api_spread_metrics(spread_id: str):
             model = spread["model_name"]
 
             queries = {
-                "pods": f'count(up{{namespace="{ns}",job=~".*{model}.*"}}==1)',
+                "pods": f'count(up{{namespace="{ns}"}}==1)',
                 "latency": (
                     f'rate(vllm:e2e_request_latency_seconds_sum{{namespace="{ns}"}}[5m])'
                     f' / rate(vllm:e2e_request_latency_seconds_count{{namespace="{ns}"}}[5m])'
