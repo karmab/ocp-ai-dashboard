@@ -508,11 +508,11 @@ body.light .leaflet-popup-tip { background: #fff !important; }
 const map = L.map('map', { zoomControl: false, minZoom: 3, maxZoom: 12, renderer: L.svg() }).setView([39.5, -98.5], 4);
 L.control.zoom({ position: 'topright' }).addTo(map);
 
-const darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+const darkTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
 });
-const lightTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+const lightTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
 });
 
 function toggleTheme() {
