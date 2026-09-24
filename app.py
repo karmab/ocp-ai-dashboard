@@ -1172,21 +1172,46 @@ def api_spread_metrics(spread_id: str):
     with ThreadPoolExecutor(max_workers=4) as pool:
         spoke_results = list(pool.map(spoke_metrics, spread["spokes"]))
 
-    scores = []
-    for s in spoke_results:
-        latency_penalty = min(s["avg_latency_ms"] / 1000, 3)
-        score = round(max(4 - latency_penalty, 1), 2)
-        scores.append(score)
+    grid_scores = {}
+    route_to = ""
+    try:
+        clients = get_k8s_clients(hub_cluster["kubeconfig"])
+        custom = clients["custom"]
+        networks = custom.list_cluster_custom_object(
+            group="grid.praxis-proxy.io", version="v1alpha1",
+            plural="gridnetworks", _request_timeout=K8S_TIMEOUT,
+        ).get("items", [])
+        active_net = next((n for n in networks if n.get("status", {}).get("phase") == "Active"), None)
+        if active_net:
+            overlay_name = active_net.get("status", {}).get("overlayStatus", [{}])[0].get("configMapName", "")
+            if overlay_name:
+                cm = clients["core"].read_namespaced_config_map(
+                    name=overlay_name, namespace="grid-system", _request_timeout=K8S_TIMEOUT,
+                )
+                routing = json.loads(cm.data.get("routing-config.json", "{}"))
+                best_rank = None
+                for cand in routing.get("candidates", []):
+                    for spoke_name in spread["spokes"]:
+                        if spoke_name in cand.get("site", ""):
+                            grid_scores[spoke_name] = {
+                                "score": cand.get("score", 0),
+                                "rank": cand.get("rank", 99),
+                                "queue_depth": cand.get("score_breakdown", {}).get("queue_depth", 0),
+                            }
+                            if best_rank is None or cand.get("rank", 99) < best_rank:
+                                best_rank = cand.get("rank", 99)
+                                route_to = spoke_name
+    except Exception:
+        pass
 
-    max_score = max(scores) if scores else 0
-    best_indices = [i for i, sc in enumerate(scores) if sc == max_score]
-    best_idx = best_indices[int(time.time()) % len(best_indices)] if best_indices else 0
+    scores = [grid_scores.get(s["name"], {}).get("score", 0) for s in spoke_results]
     return {
         "spread": spread,
         "hub_url": hub_url,
         "spokes": spoke_results,
         "scores": scores,
-        "route_to": spoke_results[best_idx]["name"] if spoke_results else "",
+        "grid_scores": grid_scores,
+        "route_to": route_to,
     }
 
 
