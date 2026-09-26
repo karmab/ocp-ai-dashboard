@@ -915,7 +915,7 @@ class GridPoliciesUpdate(BaseModel):
 
 @app.patch("/api/grid/policies")
 def api_patch_grid_policies(body: GridPoliciesUpdate):
-    _, custom = _get_hub_clients()
+    hub, custom = _get_hub_clients()
     patch_spec = {}
     if body.routing_policy is not None:
         patch_spec["routingPolicy"] = body.routing_policy
@@ -929,6 +929,15 @@ def api_patch_grid_policies(body: GridPoliciesUpdate):
         group=GRID_GROUP, version=GRID_VERSION,
         plural="gridnetworks", name=body.network_name,
         body={"spec": patch_spec},
+        _request_timeout=K8S_TIMEOUT,
+    )
+    time.sleep(3)
+    clients = get_k8s_clients(hub["kubeconfig"])
+    apps_api = client.AppsV1Api(clients["api_client"])
+    now = datetime.now(timezone.utc).isoformat()
+    apps_api.patch_namespaced_deployment(
+        name="consumer-gateway", namespace="grid-system",
+        body={"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}},
         _request_timeout=K8S_TIMEOUT,
     )
     updated = custom.get_cluster_custom_object(
@@ -1035,16 +1044,10 @@ def api_traffic_start(body: TrafficConfig):
 
     def runner():
         end_time = time.time() + body.duration
-        while time.time() < end_time and not _traffic_stop_event.is_set():
-            threads = []
-            for _ in range(body.concurrency):
-                if _traffic_stop_event.is_set():
-                    break
-                t = threading.Thread(target=send_one, daemon=True)
-                t.start()
-                threads.append(t)
-            for t in threads:
-                t.join(timeout=130)
+        with ThreadPoolExecutor(max_workers=body.concurrency) as pool:
+            while time.time() < end_time and not _traffic_stop_event.is_set():
+                pool.submit(send_one)
+                time.sleep(0.05)
         with _traffic_lock:
             _traffic_state["running"] = False
 
