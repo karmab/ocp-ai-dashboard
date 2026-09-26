@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -867,144 +869,71 @@ def api_list_apps(name: str):
     return list_apps(cluster)
 
 
-class AppDeploy(BaseModel):
-    app_name: str
-    image: str
-    namespace: str
-    replicas: int = 1
+GRID_GROUP = "grid.praxis-proxy.io"
+GRID_VERSION = "v1alpha1"
 
 
-@app.post("/api/clusters/{name}/apps")
-def api_deploy_app(name: str, body: AppDeploy):
+def _get_hub_and_network():
     clusters = load_clusters()
-    cluster = next((c for c in clusters if c["name"] == name), None)
-    if not cluster:
-        raise HTTPException(404, f"Cluster '{name}' not found")
-    try:
-        clients = get_k8s_clients(cluster["kubeconfig"])
-        core = clients["core"]
-        apps_api = client.AppsV1Api(clients["api_client"])
-
-        try:
-            core.create_namespace(
-                client.V1Namespace(metadata=client.V1ObjectMeta(name=body.namespace))
-            )
-        except client.exceptions.ApiException as e:
-            if e.status != 409:
-                raise
-
-        deployment = client.V1Deployment(
-            metadata=client.V1ObjectMeta(
-                name=body.app_name,
-                namespace=body.namespace,
-                labels={GRID_LABEL: "true"},
-            ),
-            spec=client.V1DeploymentSpec(
-                replicas=body.replicas,
-                selector=client.V1LabelSelector(
-                    match_labels={"app": body.app_name},
-                ),
-                template=client.V1PodTemplateSpec(
-                    metadata=client.V1ObjectMeta(
-                        labels={"app": body.app_name, GRID_LABEL: "true"},
-                    ),
-                    spec=client.V1PodSpec(
-                        containers=[
-                            client.V1Container(
-                                name="main",
-                                image=body.image,
-                                ports=[client.V1ContainerPort(container_port=8080)],
-                            )
-                        ]
-                    ),
-                ),
-            ),
-        )
-        apps_api.create_namespaced_deployment(
-            namespace=body.namespace, body=deployment,
-        )
-
-        service = client.V1Service(
-            metadata=client.V1ObjectMeta(
-                name=body.app_name,
-                namespace=body.namespace,
-                labels={GRID_LABEL: "true"},
-            ),
-            spec=client.V1ServiceSpec(
-                selector={"app": body.app_name},
-                ports=[client.V1ServicePort(port=8080, target_port=8080)],
-            ),
-        )
-        try:
-            core.create_namespaced_service(namespace=body.namespace, body=service)
-        except client.exceptions.ApiException as e:
-            if e.status != 409:
-                raise
-
-        route_url = None
-        try:
-            route_body = {
-                "apiVersion": "route.openshift.io/v1",
-                "kind": "Route",
-                "metadata": {
-                    "name": body.app_name,
-                    "namespace": body.namespace,
-                    "labels": {GRID_LABEL: "true"},
-                },
-                "spec": {
-                    "to": {"kind": "Service", "name": body.app_name, "weight": 100},
-                    "port": {"targetPort": 8080},
-                    "tls": {"termination": "edge", "insecureEdgeTerminationPolicy": "Redirect"},
-                },
-            }
-            created_route = clients["custom"].create_namespaced_custom_object(
-                group="route.openshift.io", version="v1",
-                namespace=body.namespace, plural="routes",
-                body=route_body,
-            )
-            route_host = created_route.get("spec", {}).get("host", "")
-            if route_host:
-                route_url = f"https://{route_host}"
-        except client.exceptions.ApiException as e:
-            if e.status != 409:
-                pass
-
-        result = {"ok": True, "message": f"Deployed app {body.app_name} on {name}"}
-        if route_url:
-            result["route_url"] = route_url
-        return result
-    except client.exceptions.ApiException as e:
-        raise HTTPException(e.status, json.loads(e.body).get("message", str(e)))
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    hub = next((c for c in clusters if "hub" in c.get("tags", [])), None)
+    if not hub:
+        raise HTTPException(404, "No hub cluster configured")
+    clients = get_k8s_clients(hub["kubeconfig"])
+    custom = clients["custom"]
+    networks = custom.list_cluster_custom_object(
+        group=GRID_GROUP, version=GRID_VERSION,
+        plural="gridnetworks", _request_timeout=K8S_TIMEOUT,
+    ).get("items", [])
+    active = next(
+        (n for n in networks if n.get("status", {}).get("phase") == "Active"), None
+    )
+    if not active:
+        raise HTTPException(404, "No active GridNetwork found")
+    return hub, active, custom
 
 
-@app.delete("/api/clusters/{cluster_name}/apps/{ns}/{app_name}")
-def api_delete_app(cluster_name: str, ns: str, app_name: str):
-    clusters = load_clusters()
-    cluster = next((c for c in clusters if c["name"] == cluster_name), None)
-    if not cluster:
-        raise HTTPException(404, f"Cluster '{cluster_name}' not found")
-    try:
-        clients = get_k8s_clients(cluster["kubeconfig"])
-        apps_api = client.AppsV1Api(clients["api_client"])
-        core = clients["core"]
+def _extract_policies(network):
+    spec = network.get("spec", {})
+    return {
+        "network_name": network["metadata"]["name"],
+        "routing_policy": spec.get("routingPolicy", ""),
+        "scoring_policy": spec.get("scoringPolicy", {}).get("strategy", ""),
+        "selection_policy": spec.get("selectionPolicy", {}).get("mode", ""),
+    }
 
-        apps_api.delete_namespaced_deployment(name=app_name, namespace=ns)
-        try:
-            core.delete_namespaced_service(name=app_name, namespace=ns)
-        except Exception:
-            pass
-        try:
-            clients["custom"].delete_namespaced_custom_object(
-                group="route.openshift.io", version="v1",
-                namespace=ns, plural="routes", name=app_name,
-            )
-        except Exception:
-            pass
-        return {"ok": True, "message": f"Deleted app {app_name}"}
-    except client.exceptions.ApiException as e:
-        raise HTTPException(e.status, json.loads(e.body).get("message", str(e)))
+
+@app.get("/api/grid/policies")
+def api_get_grid_policies():
+    _, network, _ = _get_hub_and_network()
+    return _extract_policies(network)
+
+
+class GridPoliciesUpdate(BaseModel):
+    routing_policy: Optional[str] = None
+    scoring_policy: Optional[str] = None
+    selection_policy: Optional[str] = None
+
+
+@app.patch("/api/grid/policies")
+def api_patch_grid_policies(body: GridPoliciesUpdate):
+    hub, network, custom = _get_hub_and_network()
+    patch_spec = {}
+    if body.routing_policy is not None:
+        patch_spec["routingPolicy"] = body.routing_policy
+    if body.scoring_policy is not None:
+        patch_spec["scoringPolicy"] = {"strategy": body.scoring_policy}
+    if body.selection_policy is not None:
+        patch_spec["selectionPolicy"] = {"mode": body.selection_policy}
+    if not patch_spec:
+        return _extract_policies(network)
+    custom.patch_cluster_custom_object(
+        group=GRID_GROUP, version=GRID_VERSION,
+        plural="gridnetworks", name=network["metadata"]["name"],
+        body={"spec": patch_spec},
+        _request_timeout=K8S_TIMEOUT,
+    )
+    _, updated, _ = _get_hub_and_network()
+    return _extract_policies(updated)
 
 
 def load_spreads():
