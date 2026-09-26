@@ -1183,26 +1183,23 @@ function selectGridNetwork(name) {
   let spreadsHtml = '';
   const networkSpreads = spreadsData.filter(s => true);
   if (networkSpreads.length) {
-    spreadsHtml = `
-      <div style="margin-top:12px;">
-        <div style="font-size:11px; color:#ee0000; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Model Spreads</div>
-        ${networkSpreads.map(s => {
-          const statusColor = s.verified ? '#44cc66' : '#ff4444';
-          const statusText = s.verified ? 'verified' : 'unverified';
-          return `
-          <div style="background:#1a1a1a; border-left:3px solid ${s.verified ? '#cc44ff' : '#666'}; border-radius:4px; padding:8px 10px; margin-bottom:6px; font-size:12px; cursor:pointer;" onclick="window.open('/spread.html?id=${s.id}', '_blank')">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-weight:500; font-size:13px;">${s.model_id}</span>
-              <span style="color:${statusColor}; font-size:11px;">${statusText}</span>
-            </div>
-            <div style="color:#999;">${s.hub} → ${s.spokes.join(', ')}</div>
-          </div>`;
-        }).join('')}
+    spreadsHtml = networkSpreads.map(s => {
+      const statusColor = s.verified ? '#44cc66' : '#ff4444';
+      const statusText = s.verified ? 'verified' : 'unverified';
+      return `
+      <div style="background:#1a1a1a; border-left:3px solid ${s.verified ? '#cc44ff' : '#666'}; border-radius:4px; padding:8px 10px; margin-bottom:6px; font-size:12px; cursor:pointer;" onclick="window.open('/spread.html?id=${s.id}', '_blank')">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-weight:500; font-size:13px;">${s.model_id}</span>
+          <span style="color:${statusColor}; font-size:11px;">${statusText}</span>
+        </div>
+        <div style="color:#999;">${s.hub} → ${s.spokes.join(', ')}</div>
       </div>`;
+    }).join('');
   }
 
   document.getElementById('gp-detail').innerHTML = `
     <div style="margin-top:8px;">
+      ${spreadsHtml}
       <div class="form-group" style="margin-bottom:8px;">
         <label style="color:#999; font-size:11px;">Routing Policy</label>
         ${makeSelect('gp-routing', routingOpts, net.routing_policy)}
@@ -1216,7 +1213,6 @@ function selectGridNetwork(name) {
         ${makeSelect('gp-selection', selectionOpts, net.selection_policy)}
       </div>
       <div id="gp-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
-      ${spreadsHtml}
     </div>
   `;
 }
