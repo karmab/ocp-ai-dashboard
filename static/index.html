@@ -308,6 +308,42 @@ body.light .leaflet-popup-tip { background: #fff !important; }
     </div>
 
     <div class="sidebar-section">
+      <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('traffic-gen-wrap')">Traffic Generator <span id="traffic-gen-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
+      <div id="traffic-gen-wrap">
+        <div id="traffic-gen-content">
+          <div class="form-group" style="margin-bottom:8px;">
+            <label style="color:#999; font-size:11px;">Model</label>
+            <select id="tg-model" style="width:100%; background:#2a2a2a; border:1px solid #444; color:#fff; padding:4px 8px; border-radius:4px; font-family:inherit; font-size:12px; margin-top:4px;">
+              <option value="">Auto (first available)</option>
+            </select>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+            <div class="form-group">
+              <label style="color:#999; font-size:11px;">Concurrency</label>
+              <input type="number" id="tg-concurrency" value="5" min="1" max="50" style="width:100%; background:#2a2a2a; border:1px solid #444; color:#fff; padding:4px 8px; border-radius:4px; font-family:inherit; font-size:12px; margin-top:4px;">
+            </div>
+            <div class="form-group">
+              <label style="color:#999; font-size:11px;">Duration (s)</label>
+              <input type="number" id="tg-duration" value="60" min="10" max="600" style="width:100%; background:#2a2a2a; border:1px solid #444; color:#fff; padding:4px 8px; border-radius:4px; font-family:inherit; font-size:12px; margin-top:4px;">
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button id="tg-start-btn" class="btn btn-sm" onclick="startTraffic()" style="flex:1;">Start</button>
+            <button id="tg-stop-btn" class="btn btn-outline btn-sm" onclick="stopTraffic()" style="flex:1; display:none;">Stop</button>
+          </div>
+          <div id="tg-status" style="display:none; background:#1a1a1a; border-radius:4px; padding:10px; font-size:12px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; text-align:center;">
+              <div><div style="color:#999; font-size:10px;">Sent</div><div id="tg-sent" style="font-weight:500; color:#fff;">0</div></div>
+              <div><div style="color:#999; font-size:10px;">OK</div><div id="tg-ok" style="font-weight:500; color:#00cc66;">0</div></div>
+              <div><div style="color:#999; font-size:10px;">Errors</div><div id="tg-err" style="font-weight:500; color:#ff4444;">0</div></div>
+            </div>
+            <div id="tg-rate" style="color:#999; font-size:11px; text-align:center; margin-top:6px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
       <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('spreads-section-wrap')">Model Spreads <span id="spreads-section-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
       <div id="spreads-section-wrap">
         <div id="spreads-list" style="margin-bottom: 8px;"></div>
@@ -1162,6 +1198,79 @@ async function updateGridPolicy() {
   }
 }
 
+let trafficPollInterval = null;
+
+async function populateTrafficModels() {
+  try {
+    const spreads = await fetchJSON('/api/spreads');
+    const sel = document.getElementById('tg-model');
+    const seen = new Set();
+    for (const s of spreads) {
+      if (!seen.has(s.model_id)) {
+        seen.add(s.model_id);
+        const opt = document.createElement('option');
+        opt.value = s.model_id;
+        opt.textContent = s.model_id;
+        sel.appendChild(opt);
+      }
+    }
+  } catch (e) {}
+}
+
+async function startTraffic() {
+  const model = document.getElementById('tg-model').value || undefined;
+  const concurrency = parseInt(document.getElementById('tg-concurrency').value);
+  const duration = parseInt(document.getElementById('tg-duration').value);
+
+  try {
+    await fetchJSON('/api/traffic/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ concurrency, duration, model_id: model }),
+    });
+    document.getElementById('tg-start-btn').style.display = 'none';
+    document.getElementById('tg-stop-btn').style.display = 'block';
+    document.getElementById('tg-status').style.display = 'block';
+    trafficPollInterval = setInterval(pollTrafficStatus, 2000);
+    toast('Traffic generator started');
+  } catch (e) {
+    toast('Start failed: ' + e.message, 5000);
+  }
+}
+
+async function stopTraffic() {
+  try {
+    await fetchJSON('/api/traffic/stop', { method: 'POST' });
+    toast('Traffic generator stopped');
+  } catch (e) {
+    toast('Stop failed: ' + e.message, 5000);
+  }
+  resetTrafficUI();
+}
+
+function resetTrafficUI() {
+  if (trafficPollInterval) { clearInterval(trafficPollInterval); trafficPollInterval = null; }
+  document.getElementById('tg-start-btn').style.display = 'block';
+  document.getElementById('tg-stop-btn').style.display = 'none';
+}
+
+async function pollTrafficStatus() {
+  try {
+    const data = await fetchJSON('/api/traffic/status');
+    document.getElementById('tg-sent').textContent = data.total_sent;
+    document.getElementById('tg-ok').textContent = data.total_ok;
+    document.getElementById('tg-err').textContent = data.total_err;
+    if (data.started_at && data.total_sent > 0) {
+      const elapsed = (Date.now() - new Date(data.started_at).getTime()) / 1000;
+      const rate = (data.total_sent / elapsed * 60).toFixed(1);
+      document.getElementById('tg-rate').textContent = `${rate} req/min`;
+    }
+    if (!data.running) {
+      resetTrafficUI();
+    }
+  } catch (e) {}
+}
+
 async function loadSpreads() {
   try {
     spreadsData = await fetchJSON('/api/spreads');
@@ -1437,7 +1546,16 @@ async function pollTraffic() {
   } catch (e) {}
 }
 
-loadClusters().then(() => { setupDropTargets(); loadSpreads(); loadMetricsSummary(); loadGridPolicies(); });
+loadClusters().then(() => { setupDropTargets(); loadSpreads(); loadMetricsSummary(); loadGridPolicies(); populateTrafficModels(); });
+fetchJSON('/api/traffic/status').then(data => {
+  if (data.running) {
+    document.getElementById('tg-start-btn').style.display = 'none';
+    document.getElementById('tg-stop-btn').style.display = 'block';
+    document.getElementById('tg-status').style.display = 'block';
+    trafficPollInterval = setInterval(pollTrafficStatus, 2000);
+    pollTrafficStatus();
+  }
+}).catch(() => {});
 setInterval(loadMetricsSummary, 30000);
 setInterval(pollTraffic, 5000);
 </script>

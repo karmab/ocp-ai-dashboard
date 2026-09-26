@@ -1,7 +1,9 @@
 import hashlib
 import json
 import os
+import random
 import ssl
+import threading
 import time
 import traceback
 import urllib.request
@@ -934,6 +936,133 @@ def api_patch_grid_policies(body: GridPoliciesUpdate):
     )
     _, updated, _ = _get_hub_and_network()
     return _extract_policies(updated)
+
+
+_traffic_state = {
+    "running": False,
+    "total_sent": 0,
+    "total_ok": 0,
+    "total_err": 0,
+    "started_at": None,
+    "config": {},
+}
+_traffic_lock = threading.Lock()
+_traffic_stop_event = threading.Event()
+
+_TRAFFIC_PROMPTS = [
+    "Write a detailed essay about the history of computing",
+    "Explain quantum mechanics to a 10 year old",
+    "Write a short story about a robot learning to play guitar",
+    "Describe every planet in the solar system",
+    "Explain the theory of relativity",
+    "Write a guide to machine learning algorithms",
+    "Describe the evolution of programming languages",
+    "Write about the history of the internet",
+]
+
+
+class TrafficConfig(BaseModel):
+    concurrency: int = 5
+    duration: int = 60
+    model_id: Optional[str] = None
+    max_tokens: int = 128
+
+
+@app.post("/api/traffic/start")
+def api_traffic_start(body: TrafficConfig):
+    with _traffic_lock:
+        if _traffic_state["running"]:
+            raise HTTPException(409, "Traffic generator already running")
+
+    clusters = load_clusters()
+    hub = next((c for c in clusters if "hub" in c.get("tags", [])), None)
+    if not hub:
+        raise HTTPException(404, "No hub cluster configured")
+    hub_url = _get_cached_hub_url(hub)
+    if not hub_url:
+        raise HTTPException(503, "Consumer gateway not reachable")
+
+    model_id = body.model_id
+    if not model_id:
+        spreads = load_spreads()
+        if not spreads:
+            raise HTTPException(404, "No model spreads available")
+        model_id = spreads[0]["model_id"]
+
+    endpoint = f"{hub_url}/v1/chat/completions"
+
+    with _traffic_lock:
+        _traffic_state.update({
+            "running": True,
+            "total_sent": 0,
+            "total_ok": 0,
+            "total_err": 0,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "config": {
+                "concurrency": body.concurrency,
+                "duration": body.duration,
+                "model_id": model_id,
+                "max_tokens": body.max_tokens,
+                "endpoint": endpoint,
+            },
+        })
+    _traffic_stop_event.clear()
+
+    def send_one():
+        payload = json.dumps({
+            "model": model_id,
+            "messages": [{"role": "user", "content": random.choice(_TRAFFIC_PROMPTS)}],
+            "max_tokens": body.max_tokens,
+        }).encode()
+        req = urllib.request.Request(
+            endpoint, data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            urllib.request.urlopen(req, timeout=120, context=ctx)
+            with _traffic_lock:
+                _traffic_state["total_ok"] += 1
+        except Exception:
+            with _traffic_lock:
+                _traffic_state["total_err"] += 1
+        finally:
+            with _traffic_lock:
+                _traffic_state["total_sent"] += 1
+
+    def runner():
+        end_time = time.time() + body.duration
+        while time.time() < end_time and not _traffic_stop_event.is_set():
+            threads = []
+            for _ in range(body.concurrency):
+                if _traffic_stop_event.is_set():
+                    break
+                t = threading.Thread(target=send_one, daemon=True)
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join(timeout=130)
+        with _traffic_lock:
+            _traffic_state["running"] = False
+
+    threading.Thread(target=runner, daemon=True).start()
+    return {"ok": True, "model_id": model_id, "endpoint": endpoint}
+
+
+@app.post("/api/traffic/stop")
+def api_traffic_stop():
+    _traffic_stop_event.set()
+    with _traffic_lock:
+        _traffic_state["running"] = False
+    return {"ok": True}
+
+
+@app.get("/api/traffic/status")
+def api_traffic_status():
+    with _traffic_lock:
+        return dict(_traffic_state)
 
 
 def load_spreads():
