@@ -1137,42 +1137,72 @@ function submitWizard() {
   closeWizard();
 }
 
+let gridNetworks = [];
+let selectedGridNetwork = null;
+
 async function loadGridPolicies() {
   const el = document.getElementById('grid-policies-content');
   try {
-    const data = await fetchJSON('/api/grid/policies');
-    const routingOpts = ['scoreFirst', 'geographyFirst'];
-    const scoringOpts = ['queueDepth', 'kvCachePressure', 'noMetrics'];
-    const selectionOpts = ['roundRobin', 'deterministic', 'random'];
-
-    function makeSelect(id, options, current) {
-      return `<select id="${id}" onchange="updateGridPolicy()" style="width:100%; background:#2a2a2a; border:1px solid #444; color:#fff; padding:4px 8px; border-radius:4px; font-family:inherit; font-size:12px; margin-top:4px;">
-        ${options.map(o => `<option value="${o}" ${o === current ? 'selected' : ''}>${o}</option>`).join('')}
-      </select>`;
+    gridNetworks = await fetchJSON('/api/grid/policies');
+    if (!gridNetworks.length) {
+      el.innerHTML = '<div style="color:#666;">No Grid networks found</div>';
+      return;
     }
-
-    el.innerHTML = `
-      <div style="background:#1a1a1a; border-radius:4px; padding:10px; margin-bottom:8px;">
-        <div style="color:#999; margin-bottom:2px;">Network</div>
-        <div style="font-weight:500; color:#fff;">${data.network_name}</div>
-      </div>
-      <div class="form-group" style="margin-bottom:8px;">
-        <label style="color:#999; font-size:11px;">Routing Policy</label>
-        ${makeSelect('gp-routing', routingOpts, data.routing_policy)}
-      </div>
-      <div class="form-group" style="margin-bottom:8px;">
-        <label style="color:#999; font-size:11px;">Scoring Policy</label>
-        ${makeSelect('gp-scoring', scoringOpts, data.scoring_policy)}
-      </div>
-      <div class="form-group" style="margin-bottom:8px;">
-        <label style="color:#999; font-size:11px;">Selection Policy</label>
-        ${makeSelect('gp-selection', selectionOpts, data.selection_policy)}
-      </div>
-      <div id="gp-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
-    `;
+    let html = '';
+    for (const net of gridNetworks) {
+      const phaseColor = net.phase === 'Active' ? '#00cc66' : '#999';
+      html += `
+        <div class="model-list-item" style="cursor:pointer; margin-bottom:4px;" onclick="selectGridNetwork('${net.network_name}')">
+          <div>
+            <div class="ml-name">${net.network_name}</div>
+            <div class="ml-meta"><span class="status-dot" style="background:${phaseColor};"></span>${net.phase}</div>
+          </div>
+        </div>`;
+    }
+    html += '<div id="gp-detail"></div>';
+    el.innerHTML = html;
+    selectGridNetwork(gridNetworks[0].network_name);
   } catch (e) {
     el.innerHTML = '<div style="color:#666;">No Grid network found</div>';
   }
+}
+
+function selectGridNetwork(name) {
+  selectedGridNetwork = name;
+  const net = gridNetworks.find(n => n.network_name === name);
+  if (!net) return;
+
+  document.querySelectorAll('#grid-policies-content .model-list-item').forEach(el => {
+    el.style.borderLeft = el.querySelector('.ml-name').textContent === name ? '3px solid #ee0000' : '';
+  });
+
+  const routingOpts = ['scoreFirst', 'geographyFirst'];
+  const scoringOpts = ['queueDepth', 'kvCachePressure', 'noMetrics'];
+  const selectionOpts = ['roundRobin', 'deterministic', 'random'];
+
+  function makeSelect(id, options, current) {
+    return `<select id="${id}" onchange="updateGridPolicy()" style="width:100%; background:#2a2a2a; border:1px solid #444; color:#fff; padding:4px 8px; border-radius:4px; font-family:inherit; font-size:12px; margin-top:4px;">
+      ${options.map(o => `<option value="${o}" ${o === current ? 'selected' : ''}>${o}</option>`).join('')}
+    </select>`;
+  }
+
+  document.getElementById('gp-detail').innerHTML = `
+    <div style="margin-top:8px;">
+      <div class="form-group" style="margin-bottom:8px;">
+        <label style="color:#999; font-size:11px;">Routing Policy</label>
+        ${makeSelect('gp-routing', routingOpts, net.routing_policy)}
+      </div>
+      <div class="form-group" style="margin-bottom:8px;">
+        <label style="color:#999; font-size:11px;">Scoring Policy</label>
+        ${makeSelect('gp-scoring', scoringOpts, net.scoring_policy)}
+      </div>
+      <div class="form-group" style="margin-bottom:8px;">
+        <label style="color:#999; font-size:11px;">Selection Policy</label>
+        ${makeSelect('gp-selection', selectionOpts, net.selection_policy)}
+      </div>
+      <div id="gp-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
+    </div>
+  `;
 }
 
 async function updateGridPolicy() {
@@ -1180,15 +1210,18 @@ async function updateGridPolicy() {
   statusEl.textContent = 'Updating...';
   statusEl.style.color = '#ffcc00';
   try {
-    await fetchJSON('/api/grid/policies', {
+    const updated = await fetchJSON('/api/grid/policies', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        network_name: selectedGridNetwork,
         routing_policy: document.getElementById('gp-routing').value,
         scoring_policy: document.getElementById('gp-scoring').value,
         selection_policy: document.getElementById('gp-selection').value,
       }),
     });
+    const idx = gridNetworks.findIndex(n => n.network_name === updated.network_name);
+    if (idx >= 0) gridNetworks[idx] = updated;
     statusEl.textContent = 'Updated ✓';
     statusEl.style.color = '#00cc66';
     setTimeout(() => { statusEl.textContent = ''; }, 3000);

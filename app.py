@@ -875,29 +875,21 @@ GRID_GROUP = "grid.praxis-proxy.io"
 GRID_VERSION = "v1alpha1"
 
 
-def _get_hub_and_network():
+def _get_hub_clients():
     clusters = load_clusters()
     hub = next((c for c in clusters if "hub" in c.get("tags", [])), None)
     if not hub:
         raise HTTPException(404, "No hub cluster configured")
     clients = get_k8s_clients(hub["kubeconfig"])
-    custom = clients["custom"]
-    networks = custom.list_cluster_custom_object(
-        group=GRID_GROUP, version=GRID_VERSION,
-        plural="gridnetworks", _request_timeout=K8S_TIMEOUT,
-    ).get("items", [])
-    active = next(
-        (n for n in networks if n.get("status", {}).get("phase") == "Active"), None
-    )
-    if not active:
-        raise HTTPException(404, "No active GridNetwork found")
-    return hub, active, custom
+    return hub, clients["custom"]
 
 
 def _extract_policies(network):
     spec = network.get("spec", {})
+    status = network.get("status", {})
     return {
         "network_name": network["metadata"]["name"],
+        "phase": status.get("phase", "Unknown"),
         "routing_policy": spec.get("routingPolicy", ""),
         "scoring_policy": spec.get("scoringPolicy", {}).get("strategy", ""),
         "selection_policy": spec.get("selectionPolicy", {}).get("mode", ""),
@@ -906,11 +898,16 @@ def _extract_policies(network):
 
 @app.get("/api/grid/policies")
 def api_get_grid_policies():
-    _, network, _ = _get_hub_and_network()
-    return _extract_policies(network)
+    _, custom = _get_hub_clients()
+    networks = custom.list_cluster_custom_object(
+        group=GRID_GROUP, version=GRID_VERSION,
+        plural="gridnetworks", _request_timeout=K8S_TIMEOUT,
+    ).get("items", [])
+    return [_extract_policies(n) for n in networks]
 
 
 class GridPoliciesUpdate(BaseModel):
+    network_name: str
     routing_policy: Optional[str] = None
     scoring_policy: Optional[str] = None
     selection_policy: Optional[str] = None
@@ -918,7 +915,7 @@ class GridPoliciesUpdate(BaseModel):
 
 @app.patch("/api/grid/policies")
 def api_patch_grid_policies(body: GridPoliciesUpdate):
-    hub, network, custom = _get_hub_and_network()
+    _, custom = _get_hub_clients()
     patch_spec = {}
     if body.routing_policy is not None:
         patch_spec["routingPolicy"] = body.routing_policy
@@ -927,14 +924,18 @@ def api_patch_grid_policies(body: GridPoliciesUpdate):
     if body.selection_policy is not None:
         patch_spec["selectionPolicy"] = {"mode": body.selection_policy}
     if not patch_spec:
-        return _extract_policies(network)
+        raise HTTPException(400, "No policy fields to update")
     custom.patch_cluster_custom_object(
         group=GRID_GROUP, version=GRID_VERSION,
-        plural="gridnetworks", name=network["metadata"]["name"],
+        plural="gridnetworks", name=body.network_name,
         body={"spec": patch_spec},
         _request_timeout=K8S_TIMEOUT,
     )
-    _, updated, _ = _get_hub_and_network()
+    updated = custom.get_cluster_custom_object(
+        group=GRID_GROUP, version=GRID_VERSION,
+        plural="gridnetworks", name=body.network_name,
+        _request_timeout=K8S_TIMEOUT,
+    )
     return _extract_policies(updated)
 
 
