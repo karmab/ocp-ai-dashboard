@@ -986,7 +986,7 @@ def api_traffic_start(body: TrafficConfig):
         spreads = load_spreads()
         if not spreads:
             raise HTTPException(404, "No model spreads available")
-        model_id = spreads[0]["model_id"]
+        model_id = spreads[0]["model_name"]
 
     endpoint = f"{hub_url}/v1/chat/completions"
 

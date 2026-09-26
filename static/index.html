@@ -1251,11 +1251,11 @@ async function populateTrafficModels() {
     const sel = document.getElementById('tg-model');
     const seen = new Set();
     for (const s of spreads) {
-      if (!seen.has(s.model_id)) {
-        seen.add(s.model_id);
+      if (!seen.has(s.model_name)) {
+        seen.add(s.model_name);
         const opt = document.createElement('option');
-        opt.value = s.model_id;
-        opt.textContent = `${s.model_id} (${s.hub} → ${s.spokes.join(', ')})`;
+        opt.value = s.model_name;
+        opt.textContent = `${s.model_name} (${s.hub} → ${s.spokes.join(', ')})`;
         sel.appendChild(opt);
       }
     }
