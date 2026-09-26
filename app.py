@@ -979,9 +979,7 @@ def api_traffic_start(body: TrafficConfig):
     hub = next((c for c in clusters if "hub" in c.get("tags", [])), None)
     if not hub:
         raise HTTPException(404, "No hub cluster configured")
-    hub_url = _get_cached_hub_url(hub)
-    if not hub_url:
-        raise HTTPException(503, "Consumer gateway not reachable")
+    hub_url = "http://consumer-gateway.grid-system.svc.cluster.local:8080"
 
     model_id = body.model_id
     if not model_id:
