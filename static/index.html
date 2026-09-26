@@ -343,13 +343,7 @@ body.light .leaflet-popup-tip { background: #fff !important; }
       </div>
     </div>
 
-    <div class="sidebar-section">
-      <h2 style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleSection('spreads-section-wrap')">Model Spreads <span id="spreads-section-wrap-arrow" style="font-size:12px; color:#999;">▼</span></h2>
-      <div id="spreads-section-wrap">
-        <div id="spreads-list" style="margin-bottom: 8px;"></div>
-        <button class="btn btn-outline btn-sm" onclick="openSpreadWizard()" style="width:100%; border-color:#cc44ff; color:#cc44ff;">+ Register Spread</button>
-      </div>
-    </div>
+    <div id="spreads-list" style="display:none;"></div>
 
     <div class="sidebar-section">
       <h2>Cluster Management</h2>
@@ -1186,6 +1180,27 @@ function selectGridNetwork(name) {
     </select>`;
   }
 
+  let spreadsHtml = '';
+  const networkSpreads = spreadsData.filter(s => true);
+  if (networkSpreads.length) {
+    spreadsHtml = `
+      <div style="margin-top:12px;">
+        <div style="font-size:11px; color:#ee0000; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Model Spreads</div>
+        ${networkSpreads.map(s => {
+          const statusColor = s.verified ? '#44cc66' : '#ff4444';
+          const statusText = s.verified ? 'verified' : 'unverified';
+          return `
+          <div style="background:#1a1a1a; border-left:3px solid ${s.verified ? '#cc44ff' : '#666'}; border-radius:4px; padding:8px 10px; margin-bottom:6px; font-size:12px; cursor:pointer;" onclick="window.open('/spread.html?id=${s.id}', '_blank')">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:500; font-size:13px;">${s.model_id}</span>
+              <span style="color:${statusColor}; font-size:11px;">${statusText}</span>
+            </div>
+            <div style="color:#999;">${s.hub} → ${s.spokes.join(', ')}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
   document.getElementById('gp-detail').innerHTML = `
     <div style="margin-top:8px;">
       <div class="form-group" style="margin-bottom:8px;">
@@ -1201,6 +1216,7 @@ function selectGridNetwork(name) {
         ${makeSelect('gp-selection', selectionOpts, net.selection_policy)}
       </div>
       <div id="gp-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
+      ${spreadsHtml}
     </div>
   `;
 }
@@ -1330,28 +1346,7 @@ async function loadSpreads() {
       spreadLines.push(line);
     }
   }
-  renderSpreadsList();
-}
-
-function renderSpreadsList() {
-  const el = document.getElementById('spreads-list');
-  if (!spreadsData.length) {
-    el.innerHTML = '<div style="color:#666; font-size:12px;">No active spreads</div>';
-    return;
-  }
-  el.innerHTML = spreadsData.map(s => {
-    const statusColor = s.verified ? '#44cc66' : '#ff4444';
-    const statusText = s.verified ? 'verified' : 'unverified';
-    return `
-    <div style="background:#2a2a2a; border-left:3px solid ${s.verified ? '#cc44ff' : '#666'}; border-radius:4px; padding:8px 10px; margin-bottom:6px; font-size:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-weight:500; font-size:13px;">${s.model_id}</span>
-        <span style="color:${statusColor}; font-size:11px;">${statusText}</span>
-      </div>
-      <div style="color:#999;">Hub: ${s.hub} → ${s.spokes.join(', ')}</div>
-      <button class="btn btn-danger btn-sm" style="margin-top:4px;" onclick="deleteSpread('${s.id}')">Remove</button>
-    </div>`;
-  }).join('');
+  if (selectedGridNetwork) selectGridNetwork(selectedGridNetwork);
 }
 
 function openSpreadWizard() {
@@ -1579,7 +1574,7 @@ async function pollTraffic() {
   } catch (e) {}
 }
 
-loadClusters().then(() => { setupDropTargets(); loadSpreads(); loadMetricsSummary(); loadGridPolicies(); populateTrafficModels(); });
+loadClusters().then(async () => { setupDropTargets(); await loadSpreads(); loadMetricsSummary(); loadGridPolicies(); populateTrafficModels(); });
 fetchJSON('/api/traffic/status').then(data => {
   if (data.running) {
     document.getElementById('tg-start-btn').style.display = 'none';
