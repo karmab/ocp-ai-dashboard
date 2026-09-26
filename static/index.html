@@ -312,7 +312,7 @@ body.light .leaflet-popup-tip { background: #fff !important; }
       <div id="traffic-gen-wrap">
         <div id="traffic-gen-content">
           <div class="form-group" style="margin-bottom:8px;">
-            <label style="color:#999; font-size:11px;">Model</label>
+            <label style="color:#999; font-size:11px;">Inference Endpoint</label>
             <select id="tg-model" style="width:100%; background:#2a2a2a; border:1px solid #444; color:#fff; padding:4px 8px; border-radius:4px; font-family:inherit; font-size:12px; margin-top:4px;">
               <option value="">Auto (first available)</option>
             </select>
@@ -1255,7 +1255,7 @@ async function populateTrafficModels() {
         seen.add(s.model_id);
         const opt = document.createElement('option');
         opt.value = s.model_id;
-        opt.textContent = s.model_id;
+        opt.textContent = `${s.model_id} (${s.hub} → ${s.spokes.join(', ')})`;
         sel.appendChild(opt);
       }
     }
