@@ -966,7 +966,7 @@ class TrafficConfig(BaseModel):
     concurrency: int = 5
     duration: int = 60
     model_id: Optional[str] = None
-    max_tokens: int = 128
+    max_tokens: int = 10
 
 
 @app.post("/api/traffic/start")
@@ -1012,6 +1012,7 @@ def api_traffic_start(body: TrafficConfig):
             "model": model_id,
             "messages": [{"role": "user", "content": random.choice(_TRAFFIC_PROMPTS)}],
             "max_tokens": body.max_tokens,
+            "chat_template_kwargs": {"enable_thinking": False},
         }).encode()
         req = urllib.request.Request(
             endpoint, data=payload,
