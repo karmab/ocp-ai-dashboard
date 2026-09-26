@@ -1024,9 +1024,10 @@ def api_traffic_start(body: TrafficConfig):
             urllib.request.urlopen(req, timeout=120, context=ctx)
             with _traffic_lock:
                 _traffic_state["total_ok"] += 1
-        except Exception:
+        except Exception as e:
             with _traffic_lock:
                 _traffic_state["total_err"] += 1
+                _traffic_state["last_error"] = str(e)
         finally:
             with _traffic_lock:
                 _traffic_state["total_sent"] += 1
