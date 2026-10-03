@@ -1,0 +1,7 @@
+__pycache__/
+demo/tests/
+demo/__pycache__/
+pytest.ini
+.git/
+.gitignore
+*.md

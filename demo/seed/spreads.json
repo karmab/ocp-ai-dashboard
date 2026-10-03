@@ -1,0 +1,20 @@
+[
+  {
+    "id": "demo-spread-1",
+    "model_id": "Qwen/Qwen3-0.6B",
+    "model_name": "qwen3-0-6b",
+    "model_namespace": "demo-models",
+    "hub": "vai",
+    "spokes": ["bumblefoot", "satch"],
+    "created_at": "2026-07-09T17:00:00Z"
+  },
+  {
+    "id": "demo-spread-2",
+    "model_id": "ibm-granite/granite-3.3-8b-instruct",
+    "model_name": "granite-8b",
+    "model_namespace": "demo-models",
+    "hub": "vai",
+    "spokes": ["satch"],
+    "created_at": "2026-07-15T12:00:00Z"
+  }
+]
